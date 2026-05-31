@@ -1,0 +1,57 @@
+using UnityEngine;
+
+/// <summary>
+/// Locks the camera to the chaser docking port perspective.
+/// Arrow keys pan the view; Enter resets to center.
+/// </summary>
+public class DockingCamera : MonoBehaviour
+{
+    public Transform chaserPort;
+
+    [Header("Offset from port (local space)")]
+    [Tooltip("Negative Z moves the camera behind the port face.")]
+    public Vector3 offset = new Vector3(0f, 0.3f, -1.5f);
+
+    [Header("Look Controls")]
+    public float lookSpeed = 60f;   // degrees per second
+    public float maxPitch  = 80f;
+    public float maxYaw    = 120f;
+    public KeyCode resetLookKey = KeyCode.Return;
+
+    private float pitchOffset;
+    private float yawOffset;
+
+    void Update()
+    {
+        float pitchInput = 0f;
+        float yawInput   = 0f;
+
+        if (Input.GetKey(KeyCode.UpArrow))    pitchInput = -1f;
+        if (Input.GetKey(KeyCode.DownArrow))  pitchInput =  1f;
+        if (Input.GetKey(KeyCode.LeftArrow))  yawInput   = -1f;
+        if (Input.GetKey(KeyCode.RightArrow)) yawInput   =  1f;
+
+        pitchOffset += pitchInput * lookSpeed * Time.deltaTime;
+        yawOffset   += yawInput   * lookSpeed * Time.deltaTime;
+
+        pitchOffset = Mathf.Clamp(pitchOffset, -maxPitch, maxPitch);
+        yawOffset   = Mathf.Clamp(yawOffset,   -maxYaw,   maxYaw);
+
+        if (Input.GetKeyDown(resetLookKey))
+        {
+            pitchOffset = 0f;
+            yawOffset   = 0f;
+        }
+    }
+
+    void LateUpdate()
+    {
+        if (chaserPort == null) return;
+
+        transform.position = chaserPort.TransformPoint(offset);
+
+        // Port rotation + local look offset so panning stays relative to the chaser
+        Quaternion lookOffset = Quaternion.Euler(pitchOffset, yawOffset, 0f);
+        transform.rotation = chaserPort.rotation * lookOffset;
+    }
+}

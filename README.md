@@ -286,3 +286,21 @@ cFS_Project/
         ├── UdpTelemetrySender.cs     ← 10 Hz telemetry to cFS (port 5005)
         └── UdpCommandReceiver.cs     ← timed-burn commands from cFS (port 5006)
 ```
+
+---
+
+## Journal
+
+Progress snapshots as the project develops.
+
+**Unity scene with Crew Dragon and ISS models**
+
+![Unity scene — front view](Docs/Unity_Scene_img1.png)
+
+![Unity scene — approach view](Docs/Unity_Scene_img2.png)
+
+**Blender shading work on the vehicle models**
+I was able to import Kerbal Space Program models into Blender instead of creating 3D models from scratch. However, there was plenty of issues to still fix. For example, it took a while to figure out why part of the ship was completely chrome. Turns out a value in the shading configuration was set to max.
+
+![Blender shading](Docs/Blender_Shading_Struggles.png)
+Also next I need to figure out why my shading and surfaces didn't transfer to Unity.

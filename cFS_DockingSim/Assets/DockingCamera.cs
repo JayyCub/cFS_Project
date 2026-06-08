@@ -1,16 +1,12 @@
 using UnityEngine;
 
 /// <summary>
-/// Locks the camera to the chaser docking port perspective.
+/// Docking camera that stays at its placed position/rotation and moves with the chaser port.
 /// Arrow keys pan the view; Enter resets to center.
 /// </summary>
 public class DockingCamera : MonoBehaviour
 {
     public Transform chaserPort;
-
-    [Header("Offset from port (local space)")]
-    [Tooltip("Negative Z moves the camera behind the port face.")]
-    public Vector3 offset = new Vector3(0f, 0.3f, -1.5f);
 
     [Header("Look Controls")]
     public float lookSpeed = 60f;   // degrees per second
@@ -20,6 +16,18 @@ public class DockingCamera : MonoBehaviour
 
     private float pitchOffset;
     private float yawOffset;
+
+    // Capture the camera's initial position/rotation relative to the chaser port so it
+    // moves with the chaser without being overridden by an offset calculation.
+    private Vector3    localPosition;
+    private Quaternion localRotation;
+
+    void Start()
+    {
+        if (chaserPort == null) return;
+        localPosition = chaserPort.InverseTransformPoint(transform.position);
+        localRotation = Quaternion.Inverse(chaserPort.rotation) * transform.rotation;
+    }
 
     void Update()
     {
@@ -48,10 +56,7 @@ public class DockingCamera : MonoBehaviour
     {
         if (chaserPort == null) return;
 
-        transform.position = chaserPort.TransformPoint(offset);
-
-        // Port rotation + local look offset so panning stays relative to the chaser
-        Quaternion lookOffset = Quaternion.Euler(pitchOffset, yawOffset, 0f);
-        transform.rotation = chaserPort.rotation * lookOffset;
+        transform.position = chaserPort.TransformPoint(localPosition);
+        transform.rotation = chaserPort.rotation * localRotation * Quaternion.Euler(pitchOffset, yawOffset, 0f);
     }
 }

@@ -1,0 +1,400 @@
+fileFormatVersion: 2
+guid: 07cb0297fd5502e4aba9ea630f864e33
+ModelImporter:
+  serializedVersion: 24200
+  internalIDToNameTable: []
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Airlock
+    second: {fileID: 2100000, guid: b6d0f7ce9d1cb1d48a4262f7c0b59efd, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ArgUS_2-1
+    second: {fileID: 2100000, guid: d299f82a988861f41b3d2e0e61102e4e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: BEAM.001
+    second: {fileID: 2100000, guid: 37a53616d12b77f40b4e09f3dbbef468, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: BishopMaterial
+    second: {fileID: 2100000, guid: 5ea7b5a4d0fe98e438cc1e83a34cc571, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ColKa
+    second: {fileID: 2100000, guid: 21e108accd5954d46aa5cdf3cd11f40d, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Columbus
+    second: {fileID: 2100000, guid: b78a735a5c9826b4c9b4b3608b38c7fa, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Columbus.Payloads_01
+    second: {fileID: 2100000, guid: 93eec2b7403ecc94793b84aba8847dec, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ELC_Base
+    second: {fileID: 2100000, guid: f4559a7292cb86a44933d8a204aa2399, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ELC_Payloads_02
+    second: {fileID: 2100000, guid: d62f26d76950ebb46ab6ea7c750790aa, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ELC_Payloads_03
+    second: {fileID: 2100000, guid: a5b41c19b1d392342b8b9249fb9c150a, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_EF_Diffuse
+    second: {fileID: 2100000, guid: 60592c1bced9556498b1fa639aad5b03, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_PM
+    second: {fileID: 2100000, guid: 9f8c37dbaf2be7248b0900e2195444b3, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_PS
+    second: {fileID: 2100000, guid: e714c8254068ce8489e522964ac27db4, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Lettering_1
+    second: {fileID: 2100000, guid: bb8f5597dd31db0459e50daa68e8f010, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MLI.Generic
+    second: {fileID: 2100000, guid: 439bc61ea56d863478b270d034a72b40, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Node 1
+    second: {fileID: 2100000, guid: d274b2a551f798042a3c9ed9cb0d5ae6, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Node 2_3
+    second: {fileID: 2100000, guid: d556a125c6a0b4f40b94a1c0bd00a12c, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Node.Cupola
+    second: {fileID: 2100000, guid: 6871a41e9343c514d913ad6a176fabcc, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PMA.002
+    second: {fileID: 2100000, guid: 1d073acdd19fa384390f9a7ec56b446f, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PMM
+    second: {fileID: 2100000, guid: d3810be83c8e09a43b695997816ea488, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: STP-H11
+    second: {fileID: 2100000, guid: 59c6816a43c4b394392fc226f5928a12, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Truss
+    second: {fileID: 2100000, guid: 73616f5535337ed41ae0b44c394ca231, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: USLab
+    second: {fileID: 2100000, guid: 199ea1affe0cf474c8b2cccbeadb0a51, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Zarya
+    second: {fileID: 2100000, guid: ba622938379ad214bb51c4238771c550, type: 2}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: AMS_Normal
+    second: {fileID: 2800000, guid: 9af690ba7daf9aa4b8480f3e5e144948, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Airlock_Normal
+    second: {fileID: 2800000, guid: 3caddf54fcd8d32449c2e1ae107b5ea2, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: ArgUS_M2_Normal
+    second: {fileID: 2800000, guid: 2530fe7a407b5264e8c8b061199677dd, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: BEAM_Normal
+    second: {fileID: 2800000, guid: 4d61a1dc6ff29254e9ef8f8bfafdfec8, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Bishop_Normal
+    second: {fileID: 2800000, guid: 484887ebfe013f54d9d9f23d2caf5041, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: CLARREO_Normal
+    second: {fileID: 2800000, guid: c4888358cf34c87489d1939dca7d0d01, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: CoDEx_Normal
+    second: {fileID: 2800000, guid: bd3cf877481fc054098a05cddc4f8b6f, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: ColKa_Normal
+    second: {fileID: 2800000, guid: 40dbc4b397e9a1246b235551ef148292, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Columbus_Normal
+    second: {fileID: 2800000, guid: bbcf11f802f179d41bd6a4b58d349f6a, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Columbus_Payloads_01_Normal
+    second: {fileID: 2800000, guid: 02e364804fc6a9448846f575b57cf394, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Cupola_Normal
+    second: {fileID: 2800000, guid: 2898dca56b28c2f4cb1acde7e07bbe95, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: ELC_Payloads_04_Normal
+    second: {fileID: 2800000, guid: 4e9863aa10fb9fb44b904ea278f44a54, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: EMIT_Normal
+    second: {fileID: 2800000, guid: 5368c36111f5dbb45b049a3f4d24a3e8, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: IROSA_Normal
+    second: {fileID: 2800000, guid: ee32ae8a952cca245ae11e2bb513b427, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: ISS_i-SEEP2_Normal
+    second: {fileID: 2800000, guid: cdeee6bfa5fc9274080a2a08b8891c4a, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: JEM_EF_Normal
+    second: {fileID: 2800000, guid: 02522d75c0d0f664795172e2f75d526b, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: JEM_PM_Normal
+    second: {fileID: 2800000, guid: 17bb90f1f64d61f448324ab4ee86b6ab, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: JEM_PS_Normal
+    second: {fileID: 2800000, guid: 381ce8c86fa2d17469c2344eb67368b8, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: MLI_Generic_Normal
+    second: {fileID: 2800000, guid: 629a0fc6d8b5d194497e7232c6215ff2, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: MLM_Normal
+    second: {fileID: 2800000, guid: fb70d2be4add3124d98013e98921e6a4, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: MRM1_Normal
+    second: {fileID: 2800000, guid: 87672b02d57c745468f6ae9eaf1c4d38, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: MRM2_Normal
+    second: {fileID: 2800000, guid: edfb46f27e2c10949b3ee31be16282b6, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Node1_Normal
+    second: {fileID: 2800000, guid: b23f7f331993cb345b031e112210d97d, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Node2_Node3_Normal
+    second: {fileID: 2800000, guid: 55024dceaff57e74cafc265134c1cfe1, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: PMA_Normal
+    second: {fileID: 2800000, guid: d247c3ee57a848f4ba396de2c53d89c9, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: PMM_Normal
+    second: {fileID: 2800000, guid: 23992aeef35e65e46ba9986549ebf475, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Russian Docking Module_Normal
+    second: {fileID: 2800000, guid: 4341d7a1d0b77214f948f58e9572b887, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: STP-H11_Normal
+    second: {fileID: 2800000, guid: f4f2283441186ad41924884bb0652009, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: STP-H8_Normal
+    second: {fileID: 2800000, guid: 1fdab9e6027502443bf0f8cc167ee6f8, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: STP-H9_Normal
+    second: {fileID: 2800000, guid: 30884f8ab2fae124b86e8863cb8d99da, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Truss_Normal
+    second: {fileID: 2800000, guid: 1c4deed684d6e7643b652535c3eb7bbc, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: USLab_normal
+    second: {fileID: 2800000, guid: 725892357ad9eb94ea6d000f7580be41, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Zarya_Normal
+    second: {fileID: 2800000, guid: 0bc3346a54b7b0547aa36fd1b13f8b2f, type: 3}
+  - first:
+      type: UnityEngine:Texture2D
+      assembly: UnityEngine.CoreModule
+      name: Zvezda_Normal
+    second: {fileID: 2800000, guid: 0daa8abaa83b52a48867231db544b576, type: 3}
+  materials:
+    materialImportMode: 2
+    materialName: 0
+    materialSearch: 1
+    materialLocation: 1
+  animations:
+    legacyGenerateAnimations: 4
+    bakeSimulation: 0
+    resampleCurves: 1
+    optimizeGameObjects: 0
+    removeConstantScaleCurves: 0
+    motionNodeName: 
+    animationImportErrors: 
+    animationImportWarnings: 
+    animationRetargetingWarnings: 
+    animationDoRetargetingWarnings: 0
+    importAnimatedCustomProperties: 0
+    importConstraints: 0
+    animationCompression: 1
+    animationRotationError: 0.5
+    animationPositionError: 0.5
+    animationScaleError: 0.5
+    animationWrapMode: 0
+    extraExposedTransformPaths: []
+    extraUserProperties: []
+    clipAnimations: []
+    isReadable: 0
+  meshes:
+    lODScreenPercentages: []
+    globalScale: 1
+    meshCompression: 0
+    addColliders: 0
+    useSRGBMaterialColor: 1
+    sortHierarchyByName: 1
+    importPhysicalCameras: 1
+    importVisibility: 1
+    importBlendShapes: 1
+    importCameras: 1
+    importLights: 1
+    nodeNameCollisionStrategy: 1
+    fileIdsGeneration: 2
+    swapUVChannels: 0
+    generateSecondaryUV: 0
+    useFileUnits: 1
+    keepQuads: 0
+    weldVertices: 1
+    bakeAxisConversion: 0
+    preserveHierarchy: 0
+    skinWeightsMode: 0
+    maxBonesPerVertex: 4
+    minBoneWeight: 0.001
+    optimizeBones: 1
+    generateMeshLods: 0
+    meshLodGenerationFlags: 0
+    maximumMeshLod: -1
+    meshOptimizationFlags: -1
+    indexFormat: 0
+    secondaryUVAngleDistortion: 8
+    secondaryUVAreaDistortion: 15.000001
+    secondaryUVHardAngle: 88
+    secondaryUVMarginMethod: 1
+    secondaryUVMinLightmapResolution: 40
+    secondaryUVMinObjectScale: 1
+    secondaryUVPackMargin: 4
+    useFileScale: 1
+    strictVertexDataChecks: 0
+  tangentSpace:
+    normalSmoothAngle: 60
+    normalImportMode: 0
+    tangentImportMode: 3
+    normalCalculationMode: 4
+    legacyComputeAllNormalsFromSmoothingGroupsWhenMeshHasBlendShapes: 0
+    blendShapeNormalImportMode: 1
+    normalSmoothingSource: 0
+  referencedClips: []
+  importAnimation: 1
+  humanDescription:
+    serializedVersion: 3
+    human: []
+    skeleton: []
+    armTwist: 0.5
+    foreArmTwist: 0.5
+    upperLegTwist: 0.5
+    legTwist: 0.5
+    armStretch: 0.05
+    legStretch: 0.05
+    feetSpacing: 0
+    globalScale: 1
+    rootMotionBoneName: 
+    hasTranslationDoF: 0
+    hasExtraRoot: 0
+    skeletonHasParents: 1
+  lastHumanDescriptionAvatarSource: {instanceID: 0}
+  autoGenerateAvatarMappingIfUnspecified: 1
+  animationType: 2
+  humanoidOversampling: 1
+  avatarSetup: 0
+  addHumanoidExtraRootOnlyWhenUsingAvatar: 1
+  importBlendShapeDeformPercent: 1
+  remapMaterialsIfMaterialImportModeIsNone: 0
+  additionalBone: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

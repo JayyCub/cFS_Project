@@ -39,3 +39,9 @@ cFS_DockingSim/TelemetryLog_*.csv
 # Blender source files — too large for GitHub without LFS; keep locally only
 *.blend
 *.blend1
+
+# 3D model and texture files — keep locally and sync via OneDrive instead
+*.fbx
+cFS_DockingSim/Assets/Models/**/*.jpg
+cFS_DockingSim/Assets/Models/**/*.jpeg
+cFS_DockingSim/Assets/Models/**/*.png

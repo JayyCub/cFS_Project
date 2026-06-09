@@ -304,3 +304,12 @@ I was able to import Kerbal Space Program models into Blender instead of creatin
 
 ![Blender shading](Docs/Blender_Shading_Struggles.png)
 Also next I need to figure out why my shading and surfaces didn't transfer to Unity.
+
+**June 8th Update**
+I think I finally fixed my git history and am now using Git LFS for large files.
+
+The scene in Unity looks a lot better now with materials and textures (mostly) correctly added in
+
+![Unity scene — close view](Docs/Unity_Scene_img3.png)
+
+![Unity scene — far view](Docs/Unity_Scene_img4.png)

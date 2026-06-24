@@ -6,11 +6,13 @@ using UnityEngine;
 /// </summary>
 public class DockingHUD : MonoBehaviour
 {
-    public RelativeNav      nav;
-    public DockingDetector  detector;
-    public RateDamping      rateDamping;
-    public ApproachCorridor corridor;
-    public VehicleState     chaser;
+    public RelativeNav        nav;
+    public DockingDetector    detector;
+    public RateDamping        rateDamping;
+    public ApproachCorridor   corridor;
+    public VehicleState       chaser;
+    public UdpCommandReceiver cfsReceiver;
+    public RCSModel           rcs;
 
     private GUIStyle  _style;       // main data rows  (12 pt, bold, left-aligned)
     private GUIStyle  _styleRight;  // value column    (12 pt, bold, right-aligned)
@@ -53,6 +55,7 @@ public class DockingHUD : MonoBehaviour
         DrawDockingPanel();
         DrawControlsLegend();
         DrawStatePanel();
+        DrawRcsDebugPanel();
     }
 
     // ── shared helpers ────────────────────────────────────────────────────────
@@ -80,21 +83,33 @@ public class DockingHUD : MonoBehaviour
 
     // ── docking metrics panel (top-left) ──────────────────────────────────────
 
+    static readonly string[] GncPhaseNames = { "IDLE", "CORRECT", "APPROACH", "DOCKED", "HOLD" };
+    static readonly Color[]  GncPhaseColors =
+    {
+        new Color(0.50f, 0.50f, 0.50f, 1f),  // IDLE    — gray
+        new Color(1.00f, 0.85f, 0.20f, 1f),  // CORRECT — yellow
+        new Color(0.20f, 0.90f, 1.00f, 1f),  // APPROACH— cyan
+        Color.green,                           // DOCKED  — green
+        new Color(1.00f, 0.55f, 0.10f, 1f),  // HOLD    — orange
+    };
+
     void DrawDockingPanel()
     {
-        const float LBL = 62f, VAL = 108f;
+        const float LBL = 72f, VAL = 108f;
         float pw = LBL + VAL + PAD * 2;
 
         float tRange    = detector != null ? detector.maxRange         : 0.15f;
         float tClosing  = detector != null ? detector.maxClosingSpeed  : 0.30f;
         float tLateral  = detector != null ? detector.maxLateralOffset : 0.10f;
         float tAttitude = detector != null ? detector.maxAttitudeError : 10f;
+        const float tAttAxis = 5f;  // per-axis green threshold (tighter than scalar)
 
         bool showCorridor = corridor     != null;
         bool showRdm      = rateDamping  != null;
+        bool showPhase    = cfsReceiver  != null;
         bool showDocked   = detector     != null && detector.isDocked;
 
-        int rows = 4 + (showCorridor ? 1 : 0) + (showRdm ? 1 : 0);
+        int rows = 7 + (showCorridor ? 1 : 0) + (showRdm ? 1 : 0) + (showPhase ? 1 : 0);
         float ph = PAD + HLINE + rows * LINE + (showDocked ? LINE + 3f : 0f) + PAD;
 
         float px = 12f, py = 12f;
@@ -119,15 +134,45 @@ public class DockingHUD : MonoBehaviour
             $"{nav.attitudeError:F1} deg",
             nav.attitudeError <= tAttitude ? Color.green : Color.red);
 
+        DataRow(px, ref y, LBL, VAL, "  PITCH",
+            $"{nav.pitchError:+0.0;-0.0} deg",
+            Mathf.Abs(nav.pitchError) <= tAttAxis ? Color.green : Color.red);
+
+        DataRow(px, ref y, LBL, VAL, "  YAW",
+            $"{nav.yawError:+0.0;-0.0} deg",
+            Mathf.Abs(nav.yawError) <= tAttAxis ? Color.green : Color.red);
+
+        DataRow(px, ref y, LBL, VAL, "  ROLL",
+            $"{nav.rollError:+0.0;-0.0} deg",
+            Mathf.Abs(nav.rollError) <= tAttAxis ? Color.green : Color.red);
+
         if (showCorridor)
             DataRow(px, ref y, LBL, VAL, "CORRIDOR",
                 $"{corridor.corridorAngle:F1}  {(corridor.inCorridor ? "IN" : "OUT")}",
                 corridor.inCorridor ? Color.green : Color.red);
 
         if (showRdm)
-            DataRow(px, ref y, LBL, VAL, "RDM",
-                rateDamping.isActive ? "ON  [H]" : "OFF [H]",
-                rateDamping.isActive ? Color.cyan : new Color(0.50f, 0.50f, 0.50f, 1f));
+        {
+            bool rdmSuppressed = cfsReceiver != null && cfsReceiver.CfsActive;
+            string rdmLabel    = rdmSuppressed ? "SUPPRESSED" : (rateDamping.isActive ? "ON  [H]" : "OFF [H]");
+            Color  rdmColor    = rdmSuppressed
+                ? new Color(0.50f, 0.50f, 0.50f, 1f)
+                : (rateDamping.isActive ? Color.cyan : new Color(0.50f, 0.50f, 0.50f, 1f));
+            DataRow(px, ref y, LBL, VAL, "RDM", rdmLabel, rdmColor);
+        }
+
+        if (showPhase)
+        {
+            int    phase      = cfsReceiver.GncPhase;
+            bool   connected  = cfsReceiver.CfsActive;
+            string phaseName  = (!connected)                                ? "---"
+                              : (phase >= 0 && phase < GncPhaseNames.Length) ? GncPhaseNames[phase]
+                              : "???";
+            Color  phaseColor = (connected && phase >= 0 && phase < GncPhaseColors.Length)
+                              ? GncPhaseColors[phase]
+                              : new Color(0.50f, 0.50f, 0.50f, 1f);
+            DataRow(px, ref y, LBL, VAL, "GNC", phaseName, phaseColor);
+        }
 
         if (showDocked)
         {
@@ -143,8 +188,8 @@ public class DockingHUD : MonoBehaviour
 
     void DrawControlsLegend()
     {
-        string[] keys = { "W / S", "A / D", "Space", "Ctrl", "R / F", "E / Q", "Z / X", "H", "Bksp", "Arrows", "Enter" };
-        string[] acts = { "Fwd / Back", "Left / Right", "Up", "Down", "Pitch", "Yaw", "Roll", "Rate Damp", "Reset", "Look", "Center Cam" };
+        string[] keys = { "W / S", "A / D", "Space", "Ctrl", "R / F", "E / Q", "Z / X", "H", "T", "Bksp", "Arrows", "Enter" };
+        string[] acts = { "Fwd / Back", "Left / Right", "Up", "Down", "Pitch", "Yaw", "Roll", "Rate Damp", "RCS Test", "Reset", "Look", "Center Cam" };
 
         const float LBL = 44f, ACT = 110f;
         const float LH  = 16f;
@@ -229,6 +274,49 @@ public class DockingHUD : MonoBehaviour
         _styleRight.normal.textColor = color;
         GUI.Label(new Rect(px + PAD + lblW, y, valW - PAD, LINE), $"{vel:+0.000;-0.000} m/s", _styleRight);
         y += LINE;
+    }
+
+    // ── RCS debug panel (bottom-center, visible only when suppressForces is active) ──
+
+    void DrawRcsDebugPanel()
+    {
+        if (rcs == null || !rcs.suppressForces) return;
+
+        int n    = rcs.ThrusterCount;
+        int mask = rcs.CurrentThrusterMask;
+
+        const int   COLS = 4;
+        const float CW   = 36f;
+        int         rows = Mathf.Max(1, (n + COLS - 1) / COLS);
+        float       pw   = COLS * CW + PAD * 2;
+        float       ph   = PAD + HLINE + LINE + rows * LINE + PAD;
+        float       px   = (Screen.width - pw) * 0.5f;
+        float       py   = Screen.height - ph - 12f;
+
+        BgBox(px, py, pw, ph);
+
+        float y = py + PAD;
+        SectionHeader(px, ref y, pw, "RCS DEBUG");
+
+        _style.normal.textColor = new Color(1f, 0.5f, 0.1f, 1f);
+        _style.alignment        = TextAnchor.MiddleCenter;
+        GUI.Label(new Rect(px + PAD, y, pw - PAD * 2, LINE), "FORCES SUPPRESSED  [T]", _style);
+        _style.alignment = TextAnchor.UpperLeft;
+        y += LINE;
+
+        for (int i = 0; i < n; i++)
+        {
+            bool  active = (mask & (1 << i)) != 0;
+            float cx     = px + PAD + (i % COLS) * CW;
+            float cy     = y  + (i / COLS) * LINE;
+
+            _style.normal.textColor = active
+                ? new Color(1f, 0.9f, 0f, 1f)
+                : new Color(0.3f, 0.3f, 0.3f, 1f);
+            _style.alignment = TextAnchor.MiddleCenter;
+            GUI.Label(new Rect(cx, cy, CW, LINE), $"T{i:D2}", _style);
+        }
+        _style.alignment = TextAnchor.UpperLeft;
     }
 
     static float Normalize(float angle) => angle > 180f ? angle - 360f : angle;

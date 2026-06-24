@@ -10,6 +10,8 @@ public class RateDamping : MonoBehaviour
     public VehicleState vehicle;
     [Tooltip("When assigned, RDM backs off on any axis where thrusters are actively firing.")]
     public RCSModel rcsModel;
+    [Tooltip("When assigned, RDM is fully suppressed while cFS has command authority.")]
+    public UdpCommandReceiver cfsReceiver;
 
     [Header("Thruster Authority (match RCSModel values)")]
     public float thrusterForce = 10f;
@@ -64,6 +66,7 @@ public class RateDamping : MonoBehaviour
     void FixedUpdate()
     {
         if (!isActive || vehicle == null || rb == null) return;
+        if (cfsReceiver != null && cfsReceiver.CfsActive) return;
 
         NullLinearVelocity();
         NullAngularVelocity();

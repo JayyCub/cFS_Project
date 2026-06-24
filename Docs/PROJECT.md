@@ -22,17 +22,17 @@ cFS_Project/
 │   │       └── fsw/
 │   │           ├── inc/
 │   │           │   ├── gnc_app_msgids.h
-│   │           │   └── gnc_app_tbl.h     ← GNC_ParamTbl_t struct (Phase 5B)
+│   │           │   └── gnc_app_tbl.h     ← GNC_ParamTbl_t struct
 │   │           ├── src/
 │   │           │   ├── gnc_app.h
 │   │           │   ├── gnc_app.c
 │   │           │   └── gnc_app_udp.c
 │   │           └── tables/
-│   │               └── gnc_param_tbl.c   ← default gain table (Phase 5B)
+│   │               └── gnc_param_tbl.c   ← default gain table
 │   └── sample_defs/
 │       └── tables/
 │           ├── sch_lab_table.c   ← 10 Hz tick, GNC wakeup at 1 Hz
-│           └── lc_def_adt-test.c ← LC actionpoints (not yet wired to GNC)
+│           └── lc_def_adt-test.c ← LC actionpoints firing ABORT RTS
 └── cFS_DockingSim/               ← Unity 6 project
     └── Assets/
         ├── VehicleState.cs
@@ -70,16 +70,16 @@ Key physics decisions:
 ### Phase 2 — Docking Infrastructure (complete)
 Define what "docked" means and visualize the approach.
 
-- `RelativeNav.cs` — computes approach state every FixedUpdate from port Transform positions and Rigidbody velocities: `range`, `closingSpeed` (positive = approaching), `lateralOffset`, `attitudeError` (0° = ports perfectly anti-parallel/ready to dock).
+- `RelativeNav.cs` — computes approach state every FixedUpdate from port Transform positions and Rigidbody velocities: `range`, `closingSpeed` (positive = approaching), `lateralOffset`, `attitudeError` (0° = ports perfectly anti-parallel/ready to dock). Also computes per-axis attitude errors `pitchError`, `yawError`, `rollError` by decomposing the error quaternion from chaserPort to the target docking orientation.
 - `DockingDetector.cs` — monitors RelativeNav; fires `UnityEvent onDock` once when all thresholds are met (range ≤ 0.15 m, closing speed ≤ 0.30 m/s, lateral offset ≤ 0.10 m, attitude error ≤ 10°). `isDocked` bool is public.
 - `ApproachCorridor.cs` — cone geometry (half-angle 15°, max range 20 m) from targetPort. `inCorridor` bool and `corridorAngle` float. Draws orange/green gizmo in Scene view.
-- `TelemetryLogger.cs` — 10 Hz CSV log to project root. Columns define the Phase 4 UDP packet format: `MET_s, Range_m, ClosingSpeed_ms, LateralOffset_m, AttitudeError_deg, Pos_X/Y/Z, Vel_X/Y/Z, AngVel_X/Y/Z, InCorridor, Docked`.
+- `TelemetryLogger.cs` — 10 Hz CSV log to project root.
 
 ### Phase 3 — GNC Prep (complete)
 Instrumentation and controls that mirror real GNC software behavior.
 
-- `RateDamping.cs` — proportional rate nulling controller. Directly writes `rb.angularVelocity` and `rb.linearVelocity` to avoid ForceMode ambiguity. Toggle with H key. Backs off completely when RCSModel reports active thrusters on that axis (translation bits 0–5 / rotation bits 6–11) so it does not fight intentional commands. Key inspector values: `inertiaTensor = 80`, `angularDeadband = 0.1 deg/s`, `linearDeadband = 0.005 m/s`.
-- `DockingHUD.cs` — OnGUI HUD (no external packages). Top-left: docking metrics color-coded green/red. Middle-left: corridor status and RDM mode (cyan = ON). Bottom-left: vehicle state panel (roll/pitch/yaw ±180°, angular rates deg/s, body-frame Vx/Vy/Vz). Top-right: controls legend.
+- `RateDamping.cs` — proportional rate nulling controller. Directly writes `rb.angularVelocity` and `rb.linearVelocity` to avoid ForceMode ambiguity. Toggle with H key. Backs off on any axis where RCSModel reports active thrusters (translation bits 0–5 / rotation bits 6–11). **Auto-suppresses entirely when cFS has command authority** (`cfsReceiver.CfsActive`) so it never fights the attitude autopilot. Key inspector values: `inertiaTensor = 80`, `angularDeadband = 0.1 deg/s`, `linearDeadband = 0.005 m/s`.
+- `DockingHUD.cs` — OnGUI HUD (no external packages). Top-left: docking metrics (range, closing speed, lateral offset, scalar attitude error, per-axis pitch/yaw/roll errors, corridor status, RDM state, GNC phase). Bottom-left: vehicle state panel (roll/pitch/yaw ±180°, angular rates deg/s, body-frame Vx/Vy/Vz). Top-right: controls legend.
 - `DockingCamera.cs` — attaches to Main Camera, follows chaserPort transform with local offset. Arrow keys articulate pitch/yaw; Enter resets to center.
 - `ScenarioReset.cs` — Backspace resets chaser to initial position/rotation and zeroes velocities. `DoReset()` is callable programmatically.
 
@@ -94,97 +94,25 @@ Rather than binary on/off mode (thruster ON for a full 1 s cycle), the GNC compu
 duration = delta_v_needed / thruster_accel     (thruster_accel = F/m = 10/200 = 0.05 m/s²)
 ```
 
-Unity fires each commanded thruster for exactly `duration` seconds, then auto-cuts. This eliminates the bang-bang limit cycling that caused the 0.05 ↔ 0.10 m/s oscillation observed in the binary mode.
+Unity fires each commanded thruster for exactly `duration` seconds, then auto-cuts. This eliminates the bang-bang limit cycling that binary mode causes.
 
 **GNC phase state machine (modeled on Dragon RPOD):**
 
 | Phase | Value | Trigger | Control law |
 |-------|-------|---------|-------------|
-| `GNC_PHASE_IDLE` | 0 | No telemetry received yet | All thrust inhibited |
+| `GNC_PHASE_IDLE` | 0 | No telemetry / AbortLatch set | All thrust inhibited |
 | `GNC_PHASE_CORRECT` | 1 | LateralOffset > 1.0 m | Station-keep axially; drive Pos_X/Y to zero |
 | `GNC_PHASE_APPROACH` | 2 | LateralOffset < 0.5 m | Proportional axial closure + lateral position hold |
 | `GNC_PHASE_DOCKED` | 3 | Flags bit 1 set | All thrust inhibited |
+| `GNC_PHASE_HOLD` | 4 | Ground HOLD command | Station-keep; await GO |
 
-Hysteresis pair (0.5 m / 1.0 m) prevents rapid phase toggling. Every transition generates a `GNC_APP_PHASE_INF_EID` EVS event for ground visibility. Current phase is published in the HK telemetry packet.
-
-**GNC gain summary:**
-
-| Constant | Value | Meaning |
-|----------|-------|---------|
-| `GNC_AXIAL_KP` | 0.02 | Target closing speed = KP × range (m/s per m) |
-| `GNC_MIN_CLOSE_SPEED` | 0.02 m/s | Floor on approach speed |
-| `GNC_MAX_CLOSE_SPEED` | 0.30 m/s | Cap on approach speed |
-| `GNC_LAT_KP` | 0.05 | Lateral speed = KP × lateral position error (m/s per m) |
-| `GNC_MAX_LAT_SPEED` | 0.10 m/s | Cap on lateral correction speed |
-| `GNC_MIN_BURN_DURATION` | 0.050 s | Minimum pulse — shorter burns coast |
-| `GNC_MAX_BURN_DURATION` | 0.950 s | Cap — thruster always off before next 1 Hz tick |
-| `GNC_THRUSTER_FORCE` | 10.0 N | Must match Unity Inspector RCSModel.thrusterForce |
-| `GNC_VEHICLE_MASS` | 200.0 kg | Must match Unity Rigidbody mass |
+Hysteresis pair (0.5 m / 1.0 m) prevents rapid phase toggling. Every transition generates a `GNC_APP_PHASE_INF_EID` EVS event. Current phase is published in HK telemetry and in the cFS→Unity command packet (see UDP format below).
 
 **SCH_LAB scheduler:** TickRate = 10 (10 Hz wall clock). GNC wakeup MID 0x1894 fires at PacketRate = 10 → 1 Hz guidance loop rate.
 
-**Unity side (complete):**
-- `UdpTelemetrySender.cs` — sends 60-byte telemetry packet to cFS at 10 Hz (`127.0.0.1:5005`). Background send thread.
-- `UdpCommandReceiver.cs` — listens on port 5006 for 8-byte command packet. Extracts mask (int32) and duration (float). Calls `rcsModel.SetThrusterCommand(mask, duration)`. Command timeout = 1.5 s before reverting to keyboard.
+### Phase 5A — GNC Command Interface (complete)
 
-**cFS side (complete):**
-- `gnc_app.c` — Main task loop, Init, ProcessWakeup. Subscribes to SCH_LAB wakeup MID. Runs `SelectPhase` then `ComputeControl` then `SendCommand` each wakeup. Publishes HK TLM packet to SB.
-- `gnc_app_udp.c` — Background OSAL task (`GNC_UDP_RECV`, priority 80) blocks on `OS_SocketRecvFrom`. Locks mutex, copies packet to `GNC_APP_Data.LatestTlm`, sets `TlmFresh`. `GNC_APP_SendCommand()` sends 8-byte command packet to Unity (`host.docker.internal:5006`).
-- `gnc_app.h` — All type definitions and constants. `GNC_Phase_t` enum must be declared before `GNC_APP_Data_t` (C forward-declaration rule). `GNC_APP_HkTlm_t` includes `uint8 Phase; uint8 Spare[3];` for word-alignment.
-
----
-
-## UDP Packet Format
-
-### Telemetry (Unity → cFS) — port 5005 — 60 bytes, little-endian
-
-| Offset | Type   | Field             |
-|--------|--------|-------------------|
-| 0      | float  | MET_s             |
-| 4      | float  | Range_m           |
-| 8      | float  | ClosingSpeed_ms   |
-| 12     | float  | LateralOffset_m   |
-| 16     | float  | AttitudeError_deg |
-| 20     | float  | Pos_X             |
-| 24     | float  | Pos_Y             |
-| 28     | float  | Pos_Z             |
-| 32     | float  | Vel_X             |
-| 36     | float  | Vel_Y             |
-| 40     | float  | Vel_Z             |
-| 44     | float  | AngVel_X          |
-| 48     | float  | AngVel_Y          |
-| 52     | float  | AngVel_Z          |
-| 56     | int32  | Flags (bit0=InCorridor, bit1=Docked) |
-
-Struct is `__attribute__((packed))` in C; `BuildPacket()` in `UdpTelemetrySender.cs` must write fields in this exact order.
-
-### Command (cFS → Unity) — port 5006 — 8 bytes, little-endian
-
-| Offset | Type  | Field        |
-|--------|-------|--------------|
-| 0      | int32 | ThrusterMask |
-| 4      | float | BurnDuration_s |
-
-ThrusterMask bit assignments match `RCSModel.cs`:
-- Bits 0–5: translation (+X, -X, +Y, -Y, +Z, -Z)
-- Bits 6–11: rotation (+pitch, -pitch, +yaw, -yaw, +roll, -roll)
-
-A mask of 0 or duration of 0.0 is a coast command — no force applied.
-
-**Axis convention (approach along world +Z, ship upright):**
-- Approach axis: body +Z = world +Z. Bit 4 closes range; bit 5 brakes.
-- Lateral X: body +X = world +X. Bit 0 = +X force; bit 1 = -X force.
-- Lateral Y: body +Y = world +Y. Bit 2 = +Y force; bit 3 = -Y force.
-
----
-
-## Phase 5 — Roadmap
-
-Priority order reflects real flight software maturity model.
-
-### 5A — GNC Command Interface (complete)
-
-`GNC_APP_CMD_MID` (0x1893) is subscribed. Full command dispatch in `GNC_APP_ProcessCmd()`. System starts **pre-latched** (guidance inhibited) and requires a ground GO before any thrust fires — matching Dragon-style positive authorization.
+`GNC_APP_CMD_MID` (0x1893) subscribed. Full command dispatch in `GNC_APP_ProcessCmd()`. System starts **pre-latched** (guidance inhibited) and requires a ground GO before any thrust fires — matching Dragon-style positive authorization.
 
 | FC | CC define | Name | Action |
 |----|-----------|------|--------|
@@ -194,83 +122,217 @@ Priority order reflects real flight software maturity model.
 | 0x03 | `GNC_APP_GO_CC` | GO | Release HOLD or AbortLatch; resume guidance from CORRECT |
 | 0x04 | `GNC_APP_ABORT_CC` | ABORT | Immediate coast + AbortLatch set; guidance stays inhibited until GO |
 
-`AbortLatch` prevents `SelectPhase` from auto-promoting IDLE → CORRECT until a GO is received. ABORT sends an immediate coast packet to Unity so any active burn stops without waiting for the next 1 Hz wakeup.
+`AbortLatch` prevents `SelectPhase` from auto-promoting IDLE → CORRECT until GO is received. ABORT sends an immediate coast packet to Unity so any active burn stops without waiting for the next 1 Hz wakeup.
 
-Commands are sent via `gnc_cmd.py` (see OPERATIONS.md). Packets are CCSDS header-only (8 bytes) delivered to CI_LAB on port 1234.
+### Phase 5B — cFS Parameter Table (complete)
 
-**Key EVS events added:** NOOP (12), RST (13), HOLD (14), GO (15), ABORT (16, CRITICAL), CMD\_LEN\_ERR (17), CMD\_CODE\_ERR (18).
+All GNC gains moved from compiled `#define` constants into a `CFE_TBL`-managed struct. Gains can be changed by editing the table source and rebuilding — or uplinked over the ground command link to a running cFS instance without a restart.
 
-**Recv task robustness fix:** `OS_SocketRecvFrom` now receives into a real `OS_SockAddr_t` instead of NULL — some OSAL/Linux builds silently error on NULL and kill the recv task. Both error paths (fatal error and wrong packet size) now emit EVS events instead of discarding silently.
-
-### 5B — cFS Parameter Table (complete)
-
-All GNC gains moved from compiled `#define` constants into a `CFE_TBL`-managed struct. Gains can now be changed by editing the table source file and rebuilding — or uplinked over the ground command link to a running cFS instance without a restart.
-
-**New files:**
+**Files:**
 
 | File | Purpose |
 |------|---------|
-| `fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` struct (12 floats, 48 bytes) |
-| `fsw/tables/gnc_param_tbl.c` | Default table values + `CFE_TBL_FILEDEF` macro; builds to `/cf/gnc_param_tbl.tbl` |
+| `fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` struct (16 floats, 64 bytes) |
+| `fsw/tables/gnc_param_tbl.c` | Default table values + `CFE_TBL_FILEDEF` macro |
 
-**Changes to existing files:**
-- `CMakeLists.txt`: added `add_cfe_tables(gnc_app fsw/tables/gnc_param_tbl.c)`
-- `gnc_app.h`: added `#include "gnc_app_tbl.h"`, EIDs 19/20, `ParamTblHandle` + `ParamTblPtr` in `GNC_APP_Data_t`
-- `gnc_app.c` Init: `CFE_TBL_Register` → `CFE_TBL_Load` → `CFE_TBL_GetAddress` at startup
-- `gnc_app.c` ProcessWakeup: `CFE_TBL_Manage` + `GetAddress` each 1 Hz cycle — picks up uplinked table images and logs EID 19 on activation
-- `gnc_app.c` ComputeControl + SelectPhase: all `#define` constants replaced with `p->FieldName` reads through the live table pointer
+**Fields in `GNC_ParamTbl_t`:**
 
-**Fields in `GNC_ParamTbl_t`:** `AxialKp`, `MinCloseSpeed`, `MaxCloseSpeed`, `ThrusterForce`, `VehicleMass`, `RotAccel`, `MinBurnDuration`, `MaxBurnDuration`, `LatKp`, `MaxLatSpeed`, `LatApproachGate`, `LatCorrectGate`.
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `AxialKp` | 0.02 | Target closing speed = KP × range (m/s per m) |
+| `MinCloseSpeed` | 0.02 m/s | Floor on approach speed |
+| `MaxCloseSpeed` | 0.30 m/s | Cap on approach speed |
+| `ThrusterForce` | 10.0 N | Must match Unity RCSModel.thrusterForce |
+| `VehicleMass` | 200.0 kg | Must match Unity Rigidbody mass |
+| `RotAccel` | 0.1875 rad/s² | (10 N × 1.5 m moment arm) / 80 kg·m² — must match Unity geometry |
+| `MinBurnDuration` | 0.050 s | Shorter pulses coast (dead-band) |
+| `MaxBurnDuration` | 0.950 s | Cap so thruster stops before next 1 Hz tick |
+| `LatKp` | 0.05 | Lateral speed = KP × position error (m/s per m) |
+| `MaxLatSpeed` | 0.10 m/s | Lateral speed cap |
+| `LatApproachGate` | 0.50 m | Enter APPROACH when lateral offset drops below this |
+| `LatCorrectGate` | 1.00 m | Enter CORRECT when lateral offset rises above this |
+| `HoldPoint1_m` | 10.0 m | Outer autonomous waypoint (0 = disabled) |
+| `HoldPoint2_m` | 3.0 m | Inner autonomous waypoint (0 = disabled) |
+| `AttKp` | 0.50 (rad/s)/rad | Attitude proportional gain |
+| `MaxAttRate` | 0.20 rad/s | Cap on commanded angular rate per axis |
 
-The old `#define` constants remain in `gnc_app.h` as documented defaults only — the control law no longer reads them at runtime.
+### Phase 5C — Autonomous Hold Points (complete)
 
-### 5C — Autonomous Hold Points
+Hold-point ranges in `GNC_ParamTbl_t` (`HoldPoint1_m`, `HoldPoint2_m`). `SelectPhase` transitions to `GNC_PHASE_HOLD` automatically when the chaser crosses a configured range threshold during APPROACH, accounting for brake distance lookahead (`v²/a`) so the vehicle can stop at the waypoint. GNC stays in HOLD until GO is received — modeling Dragon's manual authorization at each proximity-ops waypoint. Each hold-point fires at most once per approach sequence and is re-armed only on ABORT+GO. A threshold of 0.0 disables that waypoint.
 
-Depends on 5A ✓ and 5B ✓.
+### Phase 5D — LC Safety Monitoring (complete)
 
-Add hold-point ranges to `GNC_ParamTbl_t` (e.g., 10 m, 3 m). `SelectPhase` transitions to `GNC_PHASE_HOLD` automatically when the chaser crosses a configured range threshold during APPROACH. GNC stays in HOLD until the operator sends GO — modeling Dragon's manual authorization at each proximity-ops waypoint. Each hold-point arrival generates an EVS event.
+LC (Limit Checker) watchpoints monitor the HK telemetry packet each cycle:
 
-Key additions:
-- `HoldPoint1_m` / `HoldPoint2_m` float fields in `GNC_ParamTbl_t`
-- `SelectPhase`: check range against hold-point thresholds during APPROACH
-- Distinct EVS event per hold-point crossing (with range at time of entry)
+| WP # | Field | Limit | Action |
+|------|-------|-------|--------|
+| 0 | `ClosingSpeed_ms` | > 0.35 m/s | AP #0 → RTS 1 → ABORT |
+| 1 | `LateralOffset_m` | > 2.0 m | AP #1 → RTS 2 → ABORT |
+| 2 | `TlmStaleSec` | > 3 s | AP #2 → RTS 1 → ABORT (telemetry loss) |
+| 3 | `ClosingSpeed_ms` | > 0.35 m/s (paired) | Part of AP #0 compound expression |
 
-### 5D — LC Safety Monitoring
+`TlmStaleSec` increments each wakeup when no fresh Unity packet arrived; resets to 0 on fresh data. All three safety cases trigger an immediate ABORT via the SC (Stored Commands) app RTS mechanism.
 
-The Limit Checker (LC) app is already running but has no GNC watchpoints. This phase wires it up.
+### Phase 5E — Clohessy-Wiltshire Feedforward (complete)
 
-- Add watchpoints to `lc_def_wdt.c`:
-  - Range decreasing while closing speed > 0.35 m/s (overspeed)
-  - LateralOffset > 2.0 m during APPROACH (off-corridor)
-  - UdpPacketsReceived not incrementing (telemetry loss watchdog)
-- Add actionpoints to `lc_def_adt-test.c`:
-  - Overspeed → trigger RTS that sends ABORT command to GNC_APP
-  - Telemetry loss → trigger RTS that sends ABORT command to GNC_APP
-- Write abort RTS sequences in `sc_rts001.c` / `sc_rts002.c` for SC app
+`ComputeControl` computes CW feedforward delta-v each 1 Hz cycle and folds it into each channel's velocity error before computing burn duration. This pre-cancels the differential gravity that `ClohessyWiltshire.cs` applies every FixedUpdate:
 
-### 5E — Clohessy-Wiltshire Feedforward
-
-`ClohessyWiltshire.cs` already applies CW differential gravity to Unity physics, but `gnc_app.c` ignores it. At ISS orbit (n = 0.00113 rad/s) the CW accelerations are small but accumulate over a long approach. A feedforward term would cancel them.
-
-CW equations:
 ```
-ax =  3n²rx + 2n·vy
-ay = -2n·vx
-az = -n²rz
+ff_x = -(3n²·rx + 2n·vy)
+ff_y =  +2n·vx
+ff_z =  +n²·rz          (n = 0.00113 rad/s)
 ```
 
-Add to `ComputeControl`: compute CW acceleration from current position and velocity, convert to required delta-v per 1 Hz cycle, add to the velocity error before computing burn duration. This is the same feedforward structure used in real rendezvous GNC.
+The feedforward is added directly to the velocity error so the existing burn duration formula absorbs it — no extra thruster logic needed.
+
+### Phase 5F — Attitude Autopilot (complete)
+
+Closed-loop attitude control: the GNC commands the chaser to autonomously align its docking port with the ISS port and hold that attitude throughout the approach.
+
+**Unity side:**
+- `RelativeNav.cs` — decomposes the error quaternion (`Quaternion.Inverse(chaserPort.rotation) * targetRot`) into per-axis `pitchError`, `yawError`, `rollError` (degrees, [-180, 180]).
+- `UdpTelemetrySender.cs` — telemetry packet extended from 60 → **72 bytes**; per-axis errors appended at offsets 60/64/68.
+- `RateDamping.cs` — fully suppressed when `cfsReceiver.CfsActive` is true; prevents rate damping from fighting the cFS attitude controller during autonomous flight.
+
+**cFS side — Channel 3 (attitude PD, all active phases):**
+
+```
+omega_tgt = clamp(AttKp × error_rad, ±MaxAttRate)
+omega_err = omega_tgt − AngVel
+duration  = |omega_err| / RotAccel
+```
+
+Per-axis (pitch/yaw/roll) independently. Thruster bit map: +pitch=6, -pitch=7, +yaw=8, -yaw=9, +roll=10, -roll=11.
+
+**Command packet extended from 8 → 12 bytes** — bytes 8–11 carry the current `GNC_Phase_t` value so Unity always knows the GNC state without a separate channel.
+
+**HUD additions:**
+- Per-axis PITCH / YAW / ROLL error rows (green ≤ ±5°, red > ±5°), indented under the scalar ATTITUDE row.
+- GNC phase row — color-coded: gray=IDLE, yellow=CORRECT, cyan=APPROACH, green=DOCKED, orange=HOLD. Shows `---` when cFS is not connected.
+- RDM row shows `SUPPRESSED` when cFS has authority.
+
+---
+
+## UDP Packet Format
+
+### Telemetry (Unity → cFS) — port 5005 — 72 bytes, little-endian
+
+| Offset | Type   | Field               |
+|--------|--------|---------------------|
+| 0      | float  | MET_s               |
+| 4      | float  | Range_m             |
+| 8      | float  | ClosingSpeed_ms     |
+| 12     | float  | LateralOffset_m     |
+| 16     | float  | AttitudeError_deg   |
+| 20     | float  | Pos_X               |
+| 24     | float  | Pos_Y               |
+| 28     | float  | Pos_Z               |
+| 32     | float  | Vel_X               |
+| 36     | float  | Vel_Y               |
+| 40     | float  | Vel_Z               |
+| 44     | float  | AngVel_X            |
+| 48     | float  | AngVel_Y            |
+| 52     | float  | AngVel_Z            |
+| 56     | int32  | Flags (bit0=InCorridor, bit1=Docked) |
+| 60     | float  | PitchError_deg      |
+| 64     | float  | YawError_deg        |
+| 68     | float  | RollError_deg       |
+
+Struct is `__attribute__((packed))` in C (`GNC_APP_UnityTlm_t`). `BuildPacket()` in `UdpTelemetrySender.cs` must write fields in this exact order.
+
+### Command (cFS → Unity) — port 5006 — 32 bytes, little-endian (Phase 6-4+)
+
+| Offset | Type  | Field       | Notes |
+|--------|-------|-------------|-------|
+| 0      | float | Fx          | N, body-frame force |
+| 4      | float | Fy          | N |
+| 8      | float | Fz          | N |
+| 12     | float | Tx          | N·m, body-frame torque |
+| 16     | float | Ty          | N·m |
+| 20     | float | Tz          | N·m |
+| 24     | float | Duration_s  | Seconds each fired thruster fires |
+| 28     | int32 | Phase       | `GNC_Phase_t` value (0–4) |
+
+A zero wrench (all forces and torques = 0.0) is a coast/heartbeat command.
+Unity's `ThrusterAllocator` pseudo-inverse maps the wrench to physical thrusters.
+
+**Axis convention (approach along world +Z, ship upright):**
+- Approach axis: body +Z = world +Z. Bit 4 closes range; bit 5 brakes.
+- Lateral X: body +X = world +X. Bit 0 = +X force; bit 1 = -X force.
+- Lateral Y: body +Y = world +Y. Bit 2 = +Y force; bit 3 = -Y force.
+
+---
+
+## Phase 6 — RCS Physics Overhaul (planned)
+
+**Goal:** Replace the current abstract thruster model (each bit = one isolated effect) with physically accurate thrusters that have real body-frame positions and orientations. A single thruster firing produces coupled force **and** torque via **r × F**. cFS outputs a 6-DOF wrench; Unity solves control allocation.
+
+This mirrors how real spacecraft GNC actually works: the guidance law computes desired `[Fx, Fy, Fz, Tx, Ty, Tz]`, a separate control allocator maps that wrench to individual thruster on-times, and each thruster inherently couples translation and rotation.
+
+### 6-1 — Thruster Geometry Definition
+Define all 12 physical thrusters as position + direction vectors in Dragon's body frame. Validate with Scene-view gizmos before any behavior changes.
+
+**Touches:** `RCSModel.cs` (thruster data array)
+
+### 6-2 — Coupled Physics in Unity
+Replace the switch-case force/torque block with a loop: for each active thruster bit, `AddForce(dir * F)` and `AddTorque(cross(pos, dir) * F)`. Keyboard control works immediately; you can already observe that translation thrusters slightly rotate the ship.
+
+**Touches:** `RCSModel.cs`
+
+### 6-3 — Effectiveness Matrix + Pseudo-Inverse (complete)
+At startup, build the **6×N effectiveness matrix B** (columns = per-thruster `[direction; r × direction]`). Compute right pseudo-inverse **B† = B^T(BB^T)^-1** via Gauss-Jordan. This is the core of the allocator and is computed once, not per-frame. Keyboard allocation now uses the pseudo-inverse with a 20%-of-peak relative threshold.
+
+**Touches:** New `ThrusterAllocator.cs`, `RCSModel.cs`
+
+### 6-4 — New cFS Wrench Command Packet (complete)
+Changed the cFS → Unity command packet from `mask(int32) + duration(float) + phase(int32)` (12 bytes) to `Fx, Fy, Fz, Tx, Ty, Tz (6 floats) + duration(float) + phase(int32)` = **32 bytes**. `gnc_app_udp.c` converts the legacy bitmask to a body-frame wrench before packing; Unity's `UdpCommandReceiver` receives the wrench and calls `RCSModel.SetWrenchCommand()`, which runs the pseudo-inverse allocator to map it to physical thrusters.
+
+**Touches:** `gnc_app_udp.c`, `gnc_app.h` (`GNC_RCS_MOMENT_ARM` constant), `UdpCommandReceiver.cs`, `RCSModel.cs`
+
+### 6-5 — GNC Wrench Output in cFS (complete)
+`GNC_Control_t` changed from `{mask, duration}` to `{Fx, Fy, Fz, Tx, Ty, Tz, duration}`. `GNC_APP_ComputeControl()` now sets signed force/torque components directly instead of bit-flags. `GNC_APP_SendCommand()` packs the wrench struct directly into the 32-byte UDP packet — no mask→wrench conversion. The WAKEUP_INF log now shows `F=(x,y,z) T=(x,y,z) Dur=s` instead of `Cmd=0xXXX`.
+
+**Known limitation:** Fx and Fy from the lateral correction channel are zeroed by Unity's `SetWrenchCommand` (the Dragon pod geometry maps lateral force requests to yaw thrusters, causing divergence). Lateral correction effectively coasts until the thruster geometry is fixed (Phase 7).
+
+**Touches:** `gnc_app.c`, `gnc_app.h`, `gnc_app_udp.c`
+
+### 6-6 — Stuck Thruster Fault Injection
+Add a fault mode to `RCSModel.cs`: mark one or more thrusters as stuck-on. A stuck thruster fires every `FixedUpdate` regardless of commanded state, producing a genuine coupled disturbance (off-axis force + torque) that the GNC must sense and fight. This is the educational payoff of the full overhaul — a realistic fault the closed-loop system has to handle.
+
+**Touches:** `RCSModel.cs` (fault flags, Inspector toggles)
 
 ---
 
 ## Key Design Principles
 
-1. **Mirror real flight software** — proportional timed burns (Dragon RPOD model), phase state machine with hysteresis, rate damping, approach corridor, and telemetry packet format are all modeled after actual GNC software.
+1. **Mirror real flight software** — proportional timed burns (Dragon RPOD model), phase state machine with hysteresis, rate damping, approach corridor, attitude PD, LC safety monitoring, and telemetry packet format are all modeled after actual GNC software.
 2. **Physics accuracy over convenience** — inertia tensor set explicitly, torques applied in body frame, Clohessy-Wiltshire drift applied, trigger colliders used so contact doesn't corrupt dynamics.
 3. **cFS integration points are isolated** — `RCSModel.SetThrusterCommand()`, `UdpTelemetrySender`, and `UdpCommandReceiver` are the only touch points between the sim and cFS. Everything else is self-contained.
-4. **Coupling warning** — `GNC_THRUSTER_FORCE` (gnc_app.h) and `thrusterForce` (RCSModel Inspector) must always match. `GNC_VEHICLE_MASS` must always match the Rigidbody mass. If they drift the GNC will systematically under- or over-shoot every burn.
+4. **Coupling warning** — `ThrusterForce` and `VehicleMass` in `GNC_ParamTbl_t` must always match `RCSModel.thrusterForce` and the Rigidbody mass in the Unity Inspector. `RotAccel` must match `(thrusterForce × momentArm) / inertiaTensor`. If any of these drift the GNC will systematically under- or over-shoot every burn.
 5. **No external Unity packages** — OnGUI for HUD, raw UDP sockets for networking. Keeps the project portable and dependency-free.
 6. **Scene2.unity** is the working scene. SampleScene is unused.
+
+---
+
+## EVS Event IDs (gnc_app.h)
+
+| EID | Name | Meaning |
+|-----|------|---------|
+| 1 | INIT\_INF | App initialized successfully |
+| 2 | WAKEUP\_INF | 1 Hz wakeup log (phase, range, speed, lateral, attitude errors, mask, duration) |
+| 5 | UDP\_INIT\_INF | Telemetry recv socket bound on port 5005 |
+| 9 | CMD\_INIT\_INF | Command send socket ready |
+| 11 | PHASE\_INF | Phase transition (old→new) |
+| 12 | NOOP\_INF | NOOP command received |
+| 13 | RST\_INF | RESET\_COUNTERS command received |
+| 14 | HOLD\_INF | HOLD command received |
+| 15 | GO\_INF | GO command received |
+| 16 | ABORT\_CRIT | ABORT command received (CRITICAL severity) |
+| 17 | CMD\_LEN\_ERR | Malformed command (wrong length) |
+| 18 | CMD\_CODE\_ERR | Unknown command function code |
+| 19 | TBL\_UPD\_INF | Parameter table image activated |
+| 21 | HOLDPT1\_INF | Autonomous hold point 1 triggered |
+| 22 | HOLDPT2\_INF | Autonomous hold point 2 triggered |
 
 ---
 
@@ -285,7 +347,7 @@ Add to `ComputeControl`: compute CW acceleration from current position and veloc
 | R / F      | Pitch up / down     |
 | E / Q      | Yaw right / left    |
 | Z / X      | Roll CW / CCW       |
-| H          | Toggle Rate Damping |
+| H          | Toggle Rate Damping (suppressed while cFS active) |
 | Backspace  | Reset scenario      |
 | Arrow keys | Articulate camera   |
 | Enter      | Center camera       |

@@ -313,3 +313,13 @@ The scene in Unity looks a lot better now with materials and textures (mostly) c
 ![Unity scene — close view](Docs/Unity_Scene_img3.png)
 
 ![Unity scene — far view](Docs/Unity_Scene_img4.png)
+
+**June 23rd Update: RCS Plumes and Multi-Camera System**
+
+I was getting tired of math and deep issues with GNC so I just went for two big visual and usability improvements.
+
+First, proper RCS thruster plumes. Each of the 16 Draco thrusters now emits a particle-based exhaust plume driven live from the throttle state, plus a mesh-based glow cone that fades in and out smoothly when a thruster fires or cuts off. The thruster model was also updated to be physically accurate — Draco thrusters are binary (on/off at full thrust), so the pseudo-inverse allocator now snaps outputs to either full power or zero rather than fractional levels. Torque cancellation that was previously handled by proportional throttles is now left to the rate damping controller, which is more representative of how real Dragon GNC works.
+
+Second, a multi-camera system. The sim now has four switchable cameras: the original nose/docking cam (key `1`), two manually-placed ISS robotic cameras that can pan and zoom (keys `2` and `3`), and a third-person chase cam that smoothly follows Dragon from behind (key `4`). A small HUD in the corner always shows which camera is active. The screenshot below is the ISS approach camera looking out at Dragon on final approach with plumes firing.
+
+![ISS approach camera — Dragon on approach with RCS plumes](Docs/Unity_Scene_img5.png)

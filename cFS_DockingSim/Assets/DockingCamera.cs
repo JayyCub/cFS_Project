@@ -19,11 +19,13 @@ public class DockingCamera : MonoBehaviour
 
     // Capture the camera's initial position/rotation relative to the chaser port so it
     // moves with the chaser without being overridden by an offset calculation.
+    private Camera     _cam;
     private Vector3    localPosition;
     private Quaternion localRotation;
 
     void Start()
     {
+        _cam = GetComponent<Camera>();
         if (chaserPort == null) return;
         localPosition = chaserPort.InverseTransformPoint(transform.position);
         localRotation = Quaternion.Inverse(chaserPort.rotation) * transform.rotation;
@@ -31,6 +33,8 @@ public class DockingCamera : MonoBehaviour
 
     void Update()
     {
+        if (_cam != null && !_cam.enabled) return;
+
         float pitchInput = 0f;
         float yawInput   = 0f;
 
@@ -55,6 +59,7 @@ public class DockingCamera : MonoBehaviour
     void LateUpdate()
     {
         if (chaserPort == null) return;
+        if (_cam != null && !_cam.enabled) return;
 
         transform.position = chaserPort.TransformPoint(localPosition);
         transform.rotation = chaserPort.rotation * localRotation * Quaternion.Euler(pitchOffset, yawOffset, 0f);

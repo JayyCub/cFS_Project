@@ -7,7 +7,7 @@ using UnityEngine;
 /// <summary>
 /// Sends relative navigation telemetry to cFS over UDP at a fixed rate.
 ///
-/// Packet layout (60 bytes, all little-endian):
+/// Packet layout (72 bytes, all little-endian):
 ///   [0]  float  MET_s               mission elapsed time
 ///   [4]  float  Range_m
 ///   [8]  float  ClosingSpeed_ms
@@ -23,6 +23,9 @@ using UnityEngine;
 ///   [48] float  AngVel_Y
 ///   [52] float  AngVel_Z
 ///   [56] int32  Flags  (bit 0 = InCorridor, bit 1 = Docked)
+///   [60] float  PitchError_deg      per-axis attitude error [-180, 180]
+///   [64] float  YawError_deg
+///   [68] float  RollError_deg
 ///
 /// On the cFS side, declare a matching packed struct and read with CFE_SB or raw UDP.
 /// </summary>
@@ -119,13 +122,17 @@ public class UdpTelemetrySender : MonoBehaviour
     {
         Vector3 pos    = chaser.position;
         Vector3 vel    = chaser.velocity;
-        Vector3 angVel = chaser.angularVelocity;
+        // Convert world-frame angular velocity to the chaserPort's local frame so it
+        // matches the body-frame sign convention of pitchError/yawError/rollError.
+        Vector3 angVel = nav != null && nav.chaserPort != null
+            ? nav.chaserPort.InverseTransformDirection(chaser.angularVelocity)
+            : chaser.angularVelocity;
 
         bool inCorridor = corridor != null && corridor.inCorridor;
         bool docked     = detector != null && detector.isDocked;
         int  flags      = (inCorridor ? 1 : 0) | (docked ? 2 : 0);
 
-        byte[] buf = new byte[60];
+        byte[] buf = new byte[72];
         int    off = 0;
 
         void WriteFloat(float v) { Buffer.BlockCopy(BitConverter.GetBytes(v), 0, buf, off, 4); off += 4; }
@@ -146,6 +153,9 @@ public class UdpTelemetrySender : MonoBehaviour
         WriteFloat(angVel.y);
         WriteFloat(angVel.z);
         WriteInt(flags);
+        WriteFloat(nav.pitchError);
+        WriteFloat(nav.yawError);
+        WriteFloat(nav.rollError);
 
         return buf;
     }

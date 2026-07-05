@@ -12,7 +12,6 @@ public class DockingHUD : MonoBehaviour
     public ApproachCorridor   corridor;
     public VehicleState       chaser;
     public UdpCommandReceiver cfsReceiver;
-    public RCSModel           rcs;
 
     private GUIStyle  _style;       // main data rows  (12 pt, bold, left-aligned)
     private GUIStyle  _styleRight;  // value column    (12 pt, bold, right-aligned)
@@ -55,7 +54,6 @@ public class DockingHUD : MonoBehaviour
         DrawDockingPanel();
         DrawControlsLegend();
         DrawStatePanel();
-        DrawRcsDebugPanel();
     }
 
     // ── shared helpers ────────────────────────────────────────────────────────
@@ -188,8 +186,8 @@ public class DockingHUD : MonoBehaviour
 
     void DrawControlsLegend()
     {
-        string[] keys = { "W / S", "A / D", "Space", "Ctrl", "R / F", "E / Q", "Z / X", "H", "T", "Bksp", "Arrows", "Enter" };
-        string[] acts = { "Fwd / Back", "Left / Right", "Up", "Down", "Pitch", "Yaw", "Roll", "Rate Damp", "RCS Test", "Reset", "Look", "Center Cam" };
+        string[] keys = { "W / S", "A / D", "Space", "Ctrl", "R / F", "E / Q", "Z / X", "H", "`", "T", "Bksp", "Arrows", "Enter" };
+        string[] acts = { "Fwd / Back", "Left / Right", "Up", "Down", "Pitch", "Yaw", "Roll", "Rate Damp", "RCS Panel", "No Forces", "Reset", "Look", "Center Cam" };
 
         const float LBL = 44f, ACT = 110f;
         const float LH  = 16f;
@@ -274,49 +272,6 @@ public class DockingHUD : MonoBehaviour
         _styleRight.normal.textColor = color;
         GUI.Label(new Rect(px + PAD + lblW, y, valW - PAD, LINE), $"{vel:+0.000;-0.000} m/s", _styleRight);
         y += LINE;
-    }
-
-    // ── RCS debug panel (bottom-center, visible only when suppressForces is active) ──
-
-    void DrawRcsDebugPanel()
-    {
-        if (rcs == null || !rcs.suppressForces) return;
-
-        int n    = rcs.ThrusterCount;
-        int mask = rcs.CurrentThrusterMask;
-
-        const int   COLS = 4;
-        const float CW   = 36f;
-        int         rows = Mathf.Max(1, (n + COLS - 1) / COLS);
-        float       pw   = COLS * CW + PAD * 2;
-        float       ph   = PAD + HLINE + LINE + rows * LINE + PAD;
-        float       px   = (Screen.width - pw) * 0.5f;
-        float       py   = Screen.height - ph - 12f;
-
-        BgBox(px, py, pw, ph);
-
-        float y = py + PAD;
-        SectionHeader(px, ref y, pw, "RCS DEBUG");
-
-        _style.normal.textColor = new Color(1f, 0.5f, 0.1f, 1f);
-        _style.alignment        = TextAnchor.MiddleCenter;
-        GUI.Label(new Rect(px + PAD, y, pw - PAD * 2, LINE), "FORCES SUPPRESSED  [T]", _style);
-        _style.alignment = TextAnchor.UpperLeft;
-        y += LINE;
-
-        for (int i = 0; i < n; i++)
-        {
-            bool  active = (mask & (1 << i)) != 0;
-            float cx     = px + PAD + (i % COLS) * CW;
-            float cy     = y  + (i / COLS) * LINE;
-
-            _style.normal.textColor = active
-                ? new Color(1f, 0.9f, 0f, 1f)
-                : new Color(0.3f, 0.3f, 0.3f, 1f);
-            _style.alignment = TextAnchor.MiddleCenter;
-            GUI.Label(new Rect(cx, cy, CW, LINE), $"T{i:D2}", _style);
-        }
-        _style.alignment = TextAnchor.UpperLeft;
     }
 
     static float Normalize(float angle) => angle > 180f ? angle - 360f : angle;

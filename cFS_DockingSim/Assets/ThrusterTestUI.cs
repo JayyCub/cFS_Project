@@ -7,7 +7,7 @@ using UnityEngine;
 /// GameObject into the "Rcs" slot in the Inspector.
 ///
 /// Usage:
-///   F11           — show/hide the panel
+///   `             — show/hide the panel
 ///   Click T00-T15 — toggle thruster selection (green = selected; dark = deselected; dim = disabled in scene)
 ///   All/None/Inv  — bulk-select helpers
 ///   Hold FIRE     — fires all selected thrusters for as long as the button is held;
@@ -20,7 +20,21 @@ public class ThrusterTestUI : MonoBehaviour
 
     [Header("Input")]
     [Tooltip("Key to show/hide this panel.")]
-    public KeyCode toggleKey = KeyCode.F11;
+    public KeyCode toggleKey = KeyCode.BackQuote;
+
+    // Corner + role label for each thruster, shown as subtitle in the debug panel.
+    // T00-T03 are orbital retrograde thrusters — blacked out, not used for docking.
+    // T04-T07: approach group (Ap).  T08-T11: brake-yaw (By).  T12-T15: brake-pitch (Bp).
+    static readonly string[] _thrusterNames =
+    {
+        "ORB", "ORB", "ORB", "ORB",   // T00-T03: orbital retrograde (locked out)
+        "NE-A","NW-A","SW-A","SE-A",   // T04-T07: approach
+        "NE-Y","NW-Y","SW-Y","SE-Y",   // T08-T11: brake-yaw
+        "NE-P","NW-P","SW-P","SE-P",   // T12-T15: brake-pitch
+    };
+
+    // Thrusters below this index are orbital retrograde — locked in the UI.
+    const int OrbitalCount = 4;
 
     // ── State ─────────────────────────────────────────────────────────────────
     private bool   _visible     = false;
@@ -31,8 +45,8 @@ public class ThrusterTestUI : MonoBehaviour
 
     // ── Cached GUI resources (allocated once in EnsureStyles) ─────────────────
     private bool      _stylesReady;
-    private GUIStyle  _stOn, _stOff, _stDim, _stFire, _stFooter;
-    private Texture2D _txOn, _txOnH, _txOff, _txOffH, _txDim, _txFireN, _txFireH;
+    private GUIStyle  _stOn, _stOff, _stDim, _stBlocked, _stFire, _stFooter;
+    private Texture2D _txOn, _txOnH, _txOff, _txOffH, _txDim, _txBlocked, _txFireN, _txFireH;
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -63,7 +77,7 @@ public class ThrusterTestUI : MonoBehaviour
     {
         if (!_visible) return;
         EnsureStyles();
-        _windowRect = GUILayout.Window(0xF11F, _windowRect, DrawPanel, "Thruster Test  [F11]");
+        _windowRect = GUILayout.Window(0xF11F, _windowRect, DrawPanel, "Thruster Test  [`]");
     }
 
     void DrawPanel(int id)
@@ -80,17 +94,20 @@ public class ThrusterTestUI : MonoBehaviour
             {
                 int idx = row * 4 + col;
 
-                bool sceneActive = rcs != null && rcs.IsThrusterActive(idx);
-                bool nowFiring   = rcs != null && (rcs.CurrentThrusterMask & (1 << idx)) != 0;
+                bool isOrbital   = idx < OrbitalCount;
+                bool sceneActive = !isOrbital && rcs != null && rcs.IsThrusterActive(idx);
+                bool nowFiring   = !isOrbital && rcs != null && (rcs.CurrentThrusterMask & (1 << idx)) != 0;
                 bool selected    = _selected[idx];
 
-                GUIStyle st = !sceneActive ? _stDim :
-                               selected    ? _stOn  : _stOff;
+                GUIStyle st = isOrbital  ? _stBlocked :
+                              !sceneActive ? _stDim    :
+                               selected    ? _stOn     : _stOff;
 
-                // Show a dot on the button while this thruster is physically firing
-                string label = nowFiring ? $"T{idx:D2} ●" : $"T{idx:D2}";
+                string name  = idx < _thrusterNames.Length ? _thrusterNames[idx] : "";
+                string label = isOrbital  ? $"T{idx:D2}\n({name})" :
+                               nowFiring  ? $"T{idx:D2} ●\n({name})" : $"T{idx:D2}\n({name})";
 
-                if (GUILayout.Button(label, st, GUILayout.Width(66), GUILayout.Height(36)) && sceneActive)
+                if (GUILayout.Button(label, st, GUILayout.Width(66), GUILayout.Height(42)) && sceneActive)
                     _selected[idx] = !_selected[idx];
             }
             GUILayout.EndHorizontal();
@@ -101,14 +118,14 @@ public class ThrusterTestUI : MonoBehaviour
         // ── Bulk-select row ───────────────────────────────────────────────────
         GUILayout.BeginHorizontal();
         if (GUILayout.Button("All", GUILayout.Height(24)))
-            for (int i = 0; i < 16; i++)
+            for (int i = OrbitalCount; i < 16; i++)
                 _selected[i] = rcs == null || rcs.IsThrusterActive(i);
 
         if (GUILayout.Button("None", GUILayout.Height(24)))
             System.Array.Clear(_selected, 0, 16);
 
         if (GUILayout.Button("Invert", GUILayout.Height(24)))
-            for (int i = 0; i < 16; i++)
+            for (int i = OrbitalCount; i < 16; i++)
                 if (rcs == null || rcs.IsThrusterActive(i))
                     _selected[i] = !_selected[i];
         GUILayout.EndHorizontal();
@@ -149,7 +166,7 @@ public class ThrusterTestUI : MonoBehaviour
     int SelectedMask()
     {
         int m = 0;
-        for (int i = 0; i < 16; i++)
+        for (int i = OrbitalCount; i < 16; i++)
             if (_selected[i]) m |= (1 << i);
         return m;
     }
@@ -171,13 +188,15 @@ public class ThrusterTestUI : MonoBehaviour
         _txOnH   = Tex(new Color(0.28f, 0.92f, 0.32f));
         _txOff   = Tex(new Color(0.20f, 0.20f, 0.28f));
         _txOffH  = Tex(new Color(0.30f, 0.30f, 0.42f));
-        _txDim   = Tex(new Color(0.10f, 0.10f, 0.10f, 0.55f));
-        _txFireN = Tex(new Color(0.15f, 0.45f, 0.85f));
-        _txFireH = Tex(new Color(0.92f, 0.20f, 0.12f));
+        _txDim     = Tex(new Color(0.10f, 0.10f, 0.10f, 0.55f));
+        _txBlocked = Tex(new Color(0.06f, 0.06f, 0.06f, 1.00f));
+        _txFireN   = Tex(new Color(0.15f, 0.45f, 0.85f));
+        _txFireH   = Tex(new Color(0.92f, 0.20f, 0.12f));
 
-        _stOn  = MakeBtn(_txOn,  _txOnH,  Color.white,                   FontStyle.Bold);
-        _stOff = MakeBtn(_txOff, _txOffH, Color.white,                   FontStyle.Normal);
-        _stDim = MakeBtn(_txDim, _txDim,  new Color(0.35f, 0.35f, 0.35f), FontStyle.Normal);
+        _stOn      = MakeBtn(_txOn,      _txOnH,      Color.white,                       FontStyle.Bold);
+        _stOff     = MakeBtn(_txOff,     _txOffH,     Color.white,                       FontStyle.Normal);
+        _stDim     = MakeBtn(_txDim,     _txDim,      new Color(0.35f, 0.35f, 0.35f),    FontStyle.Normal);
+        _stBlocked = MakeBtn(_txBlocked, _txBlocked,  new Color(0.22f, 0.22f, 0.22f),    FontStyle.Normal);
 
         _stFire = new GUIStyle(GUI.skin.button)
         {
@@ -200,7 +219,7 @@ public class ThrusterTestUI : MonoBehaviour
 
     static GUIStyle MakeBtn(Texture2D norm, Texture2D hov, Color text, FontStyle fs)
     {
-        var s = new GUIStyle(GUI.skin.button) { fontStyle = fs, fontSize = 12 };
+        var s = new GUIStyle(GUI.skin.button) { fontStyle = fs, fontSize = 11 };
         s.normal.background  = norm;
         s.hover.background   = hov;
         s.active.background  = hov;
@@ -223,7 +242,7 @@ public class ThrusterTestUI : MonoBehaviour
         if (_fireHeld && rcs != null) rcs.ClearExternalControl();
 
         // Release dynamic textures
-        Texture2D[] all = { _txOn, _txOnH, _txOff, _txOffH, _txDim, _txFireN, _txFireH };
+        Texture2D[] all = { _txOn, _txOnH, _txOff, _txOffH, _txDim, _txBlocked, _txFireN, _txFireH };
         foreach (var t in all) if (t != null) Destroy(t);
     }
 }

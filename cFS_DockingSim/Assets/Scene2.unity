@@ -49699,8 +49699,6 @@ MonoBehaviour:
   - {fileID: 688609617}
   - {fileID: 1758605400}
   suppressForces: 0
-  testModeActive: 0
-  testThrusterIndex: -1
 --- !u!114 &1569440115
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -49773,7 +49771,7 @@ Transform:
   m_GameObject: {fileID: 1569440113}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -20}
+  m_LocalPosition: {x: 0, y: 0, z: -32}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -55194,7 +55192,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startSizeY:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 1
       minScalar: 1
       maxCurve:
@@ -55247,7 +55245,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startSizeZ:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 1
       minScalar: 1
       maxCurve:
@@ -79072,6 +79070,7 @@ GameObject:
   - component: {fileID: 2028270418}
   - component: {fileID: 2028270419}
   - component: {fileID: 2028270420}
+  - component: {fileID: 2028270421}
   m_Layer: 0
   m_Name: SimulationManager
   m_TagString: Untagged
@@ -79142,7 +79141,6 @@ MonoBehaviour:
   corridor: {fileID: 2028270417}
   chaser: {fileID: 1569440115}
   cfsReceiver: {fileID: 725698973}
-  rcs: {fileID: 1569440114}
 --- !u!114 &2028270414
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -79242,7 +79240,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ThrusterTestUI
   rcs: {fileID: 1569440114}
-  toggleKey: 292
+  toggleKey: 96
 --- !u!114 &2028270420
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -79262,6 +79260,26 @@ MonoBehaviour:
     camera: {fileID: 955778470}
   - displayName: ISS_Side
     camera: {fileID: 400522914}
+--- !u!114 &2028270421
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2028270409}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d7aea9dc3a0a14d0fb468bf46e1f7f66, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ThrusterDiagnostic
+  rcs: {fileID: 1569440114}
+  rb: {fileID: 1569440116}
+  shortBurn: 0.25
+  longBurn: 1
+  settleTime: 2
+  observeTime: 2
+  momentArm: 1.5
+  runKey: 289
 --- !u!1001 &2100015019
 PrefabInstance:
   m_ObjectHideFlags: 0

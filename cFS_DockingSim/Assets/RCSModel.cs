@@ -32,10 +32,9 @@ public struct ThrusterDef
 /// produces the unwanted rotations during lateral translation.
 ///
 /// Throttle sources (in priority order):
-///   1. Backtick test mode  — binary full-power, one thruster at a time.
-///   2. External control    — cFS or ThrusterTestUI via SetWrenchCommand /
+///   1. External control    — cFS or ThrusterTestUI via SetWrenchCommand /
 ///                            SetThrusterCommand.  Expires after burnEndTime.
-///   3. Keyboard (WASD etc) — binary; any thruster with a positive pseudo-inverse
+///   2. Keyboard (WASD etc) — binary; any thruster with a positive pseudo-inverse
 ///                            allocation fires at full thrusterForce, all others off.
 /// </summary>
 public class RCSModel : MonoBehaviour
@@ -175,49 +174,9 @@ public class RCSModel : MonoBehaviour
     // 0 = T09, - = T10, = = T11, F1-F4 = T12-T15.  Multiple keys fire simultaneously.
     // Test mode uses binary full-power so you can feel each thruster's individual effect.
 
-    [Header("Test Mode")]
-    public bool testModeActive    = false;
-    public int  testThrusterIndex = -1;
-
-    static readonly (KeyCode key, int idx)[] _testKeys = new[]
-    {
-        (KeyCode.Alpha1, 0),  (KeyCode.Alpha2, 1),  (KeyCode.Alpha3, 2),
-        (KeyCode.Alpha4, 3),  (KeyCode.Alpha5, 4),  (KeyCode.Alpha6, 5),
-        (KeyCode.Alpha7, 6),  (KeyCode.Alpha8, 7),  (KeyCode.Alpha9, 8),
-        (KeyCode.Alpha0, 9),  (KeyCode.Minus,  10), (KeyCode.Equals, 11),
-        (KeyCode.F1,    12),  (KeyCode.F2,     13), (KeyCode.F3,     14),
-        (KeyCode.F4,    15),
-    };
-
     void Update()
     {
         if (Input.GetKeyDown(KeyCode.T)) suppressForces = !suppressForces;
-
-        // ── Backtick test mode — binary full-power ────────────────────────
-        testModeActive = Input.GetKey(KeyCode.BackQuote);
-        if (testModeActive)
-        {
-            if (externalControl) ClearExternalControl();
-            testThrusterIndex = -1;
-
-            EnsureThrottleArray();
-            System.Array.Clear(_throttles, 0, _throttles.Length);
-
-            foreach (var (key, idx) in _testKeys)
-            {
-                if (Input.GetKey(key) && idx < _thrusters.Length)
-                {
-                    _throttles[idx] = thrusterForce;
-#if UNITY_EDITOR
-                    if (Input.GetKeyDown(key))
-                        Debug.Log($"[RCSModel] Test: firing T{idx:D2}  pos={_thrusters[idx].position}  " +
-                                  $"dir={_thrusters[idx].direction}");
-#endif
-                }
-            }
-            return;
-        }
-        testThrusterIndex = -1;
 
         // ── Keyboard / cFS control ────────────────────────────────────────
         if (externalControl) return;
@@ -273,6 +232,10 @@ public class RCSModel : MonoBehaviour
         // Realistic to Draco hardware — no analog throttle, just full power or off.
         for (int i = 0; i < raw.Length && i < _throttles.Length; i++)
             _throttles[i] = raw[i] > 1e-4f ? thrusterForce : 0f;
+
+        // T00–T03 are orbital retrograde thrusters — never used for docking maneuvers.
+        for (int i = 0; i < Mathf.Min(4, _throttles.Length); i++)
+            _throttles[i] = 0f;
     }
 
     void FixedUpdate()
@@ -318,6 +281,12 @@ public class RCSModel : MonoBehaviour
     /// desired force/torque across all thrusters and stores fractional throttle
     /// levels so their torques cancel — achieving clean 6-DOF translation.
     /// </summary>
+    // Force magnitude below this threshold is treated as a light brake command (T08-T11 only).
+    // cFS sends BrakeAccel_Light_mss * VehicleMass (0.136 × 4500 = 612 N) for fine corrections
+    // and BrakeAccel_Hard_mss * VehicleMass (0.281 × 4500 = 1265 N) for hard stops.
+    // Threshold = midpoint = 938 N.  Update if BrakeAccel values in gnc_param_tbl.c change.
+    private const float SoftBrakeThreshold_N = 938f;
+
     public void SetWrenchCommand(Vector3 force, Vector3 torque, float duration)
     {
         if (_allocator == null || !_allocator.IsReady)
@@ -340,6 +309,21 @@ public class RCSModel : MonoBehaviour
         // Binary on/off: consistent with Draco hardware behaviour.
         for (int i = 0; i < raw.Length && i < _throttles.Length; i++)
             _throttles[i] = raw[i] > 1e-4f ? thrusterForce : 0f;
+
+        // T00–T03 are orbital retrograde thrusters — never used for docking maneuvers.
+        for (int i = 0; i < Mathf.Min(4, _throttles.Length); i++)
+            _throttles[i] = 0f;
+
+        // Brake group selection: cFS sends a smaller force magnitude for gentle corrections
+        // (soft brake = T08-T11 only) vs hard stops (all 8 = T08-T15).
+        // If purely braking (−Z, no significant lateral demand) and force is below the soft
+        // threshold, suppress T12-T15 (the inner brake ring) for a lighter impulse.
+        if (force.z < -0.5f && force.z > -SoftBrakeThreshold_N &&
+            Mathf.Abs(force.x) < 1f && Mathf.Abs(force.y) < 1f)
+        {
+            for (int i = 12; i < Mathf.Min(16, _throttles.Length); i++)
+                _throttles[i] = 0f;
+        }
     }
 
     public void ClearExternalControl()

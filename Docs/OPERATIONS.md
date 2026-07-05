@@ -22,8 +22,12 @@ No other dependencies. No external Unity packages.
 cFS_Project/
 ├── cfs-dev.sh          ← start the Docker container
 ├── gnc_cmd.py          ← send ground commands to cFS
-├── PROJECT.md          ← architecture and design reference
-├── OPERATIONS.md       ← this file
+├── Docs/
+│   ├── PROJECT.md      ← architecture and design reference
+│   ├── OPERATIONS.md   ← this file
+│   ├── DEV_REFERENCE.md
+│   ├── RCS_THRUSTER_REFERENCE.md
+│   └── ATTITUDE_AUTOPILOT_GUIDE.md
 ├── cFS/                ← NASA cFS source (mounted into container at /cfs)
 └── cFS_DockingSim/     ← Unity project (open in Unity Editor)
 ```
@@ -100,7 +104,7 @@ Open `cFS_DockingSim/` in the Unity Editor and press **Play** on **Scene2**.
 Within 1–2 seconds cFS should start receiving telemetry. The wakeup log changes from "waiting for Unity telemetry" to:
 
 ```
-GNC #3 [IDLE] | Rng=15.23 Spd=0.000 Lat=2.41 Att=0.0 | Cor=0 Dkd=0 | Cmd=0x000 Dur=0.000s
+GNC #3 [IDLE] | Rng=15.23 Spd=0.000 Lat=2.41 | P=0.0 Y=0.0 R=0.0 | Cor=0 Dkd=0 | F=(0,0,0) T=(0,0,0) Dur=0.000s
 ```
 
 The phase shows `[IDLE]` because guidance is pre-latched. No thrusters fire yet. The vehicle drifts only under Clohessy-Wiltshire differential gravity.
@@ -124,9 +128,10 @@ GNC mode: IDLE → LAT_CORR (lat=2.41m rng=15.23m)
 ```
 
 Thrusters start firing. The GNC will:
-1. Enter **LATERAL_CORRECT** if lateral offset > 0.5 m — drives the vehicle onto the docking axis
-2. Transition to **APPROACH** once lateral offset < 0.5 m — proportional axial closure begins
-3. Enter **DOCKED** when contact thresholds are met
+1. Enter **CORRECT** if lateral offset > 1.5 m — drives the vehicle onto the docking axis
+2. Transition to **APPROACH** once lateral offset < 1.0 m — proportional axial closure begins, capped at 0.3 m/s
+3. Enter **HOLD** automatically at 20 m and 3 m range (autonomous hold points) — station-keeps and waits for `GO`; the axial closing-speed cap tightens to 0.1 m/s after the 20 m hold
+4. Enter **DOCKED** when contact thresholds are met
 
 ---
 
@@ -196,6 +201,9 @@ The cFS EVS log (printed to the terminal running `./core-cpu1`) is the primary d
 | `GNC_APP: *** ABORT ***` | 16 | ABORT accepted. Severity = CRITICAL. |
 | `GNC_APP: cmd len err` | 17 | Command packet had wrong byte count. |
 | `GNC_APP: invalid command code` | 18 | Unknown function code received. |
+| `GNC_APP: parameter table updated` | 19 | An uplinked table image was activated — new gains are live. |
+| `GNC_APP: HOLD POINT 1 — braking to ...` | 21 | Autonomous outer hold point (20 m default) reached during APPROACH. |
+| `GNC_APP: HOLD POINT 2 — braking to ...` | 22 | Autonomous inner hold point (3 m default) reached during APPROACH. |
 | `GNC_APP UDP: recv error RC=...` | 6 | Recv task got a fatal socket error and exited. Restart cFS. |
 | `GNC_APP UDP: wrong packet size` | 6 | Unity sent a packet with the wrong byte count (packet format mismatch). |
 
@@ -214,10 +222,14 @@ Controls are active when cFS is **not** in control (before GO, or after ABORT).
 | R / F | Pitch up / down |
 | E / Q | Yaw right / left |
 | Z / X | Roll CW / CCW |
+| T | Toggle force suppression (debug) |
 | H | Toggle Rate Damping |
 | Backspace | Reset scenario (zeroes velocities, returns to start position) |
-| Arrow keys | Articulate camera |
+| 1 / 2 / 3 / 4 | Switch camera (nose/docking, ISS cam A/B, chase cam) |
+| Arrow keys | Articulate active camera |
 | Enter | Center camera |
+| `` ` `` (backtick) | Toggle single-thruster test mode |
+| F8 | Run automated thruster calibration diagnostic |
 
 ---
 
@@ -245,7 +257,7 @@ Controls are active when cFS is **not** in control (before GO, or after ABORT).
 
 ### Vehicle oscillates / overshoots after GO
 
-The GNC gains (`GNC_AXIAL_KP`, `GNC_LAT_KP`, etc.) and the physical parameters (`GNC_THRUSTER_FORCE`, `GNC_VEHICLE_MASS`) must match the Unity Inspector values. If `RCSModel.thrusterForce` or the Rigidbody mass has been changed in the Inspector, update the matching constants in `gnc_app.h` and rebuild.
+The GNC gains (`AxialKp`, `LatKp`, etc.) and the physical parameters (`ThrusterForce`, `VehicleMass`) live in `GNC_ParamTbl_t` (`gnc_param_tbl.c`) and must match the Unity Inspector values. If `RCSModel.thrusterForce` or the Rigidbody mass has been changed in the Inspector, update the matching table fields and rebuild — or uplink a corrected table image to a running system without a restart.
 
 ### Rebuilding after a code change
 

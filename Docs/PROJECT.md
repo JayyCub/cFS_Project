@@ -14,7 +14,12 @@ This is a learning project. Every design decision is made to mirror how real fli
 cFS_Project/
 ├── cfs-dev.sh                    ← start Docker dev container (ports 5005 + 1234)
 ├── gnc_cmd.py                    ← ground command sender (NOOP/HOLD/GO/ABORT/RESET)
-├── OPERATIONS.md                 ← step-by-step run guide
+├── Docs/
+│   ├── PROJECT.md                ← this file
+│   ├── OPERATIONS.md             ← step-by-step run guide
+│   ├── DEV_REFERENCE.md          ← control-law channel breakdown, parameter table, common tasks
+│   ├── RCS_THRUSTER_REFERENCE.md ← per-thruster geometry and firing tables
+│   └── ATTITUDE_AUTOPILOT_GUIDE.md ← retrospective learning-guide for the attitude PD work
 ├── cFS/                          ← nasa/cFS clone (git clone --recurse-submodules)
 │   ├── apps/
 │   │   └── gnc_app/              ← custom GNC application
@@ -37,12 +42,15 @@ cFS_Project/
     └── Assets/
         ├── VehicleState.cs
         ├── RCSModel.cs
+        ├── ThrusterAllocator.cs        ← pseudo-inverse control allocator
+        ├── ThrusterPlumes.cs           ← exhaust plume visuals
+        ├── ThrusterDiagnostic.cs       ← F8 automated calibration diagnostic
         ├── ClohessyWiltshire.cs
         ├── RelativeNav.cs
         ├── ApproachCorridor.cs
         ├── DockingDetector.cs
         ├── DockingHUD.cs
-        ├── DockingCamera.cs
+        ├── CameraManager.cs / ISSCamera.cs / ChaseCam.cs / DockingCamera.cs
         ├── RateDamping.cs
         ├── ScenarioReset.cs
         ├── TelemetryLogger.cs
@@ -57,15 +65,15 @@ cFS_Project/
 ### Phase 1 — Physics Foundation (complete)
 Establish realistic 6-DOF spacecraft dynamics inside Unity.
 
-- `VehicleState.cs` — central interface for all scripts; exposes position, velocity, attitude, angular velocity, mass, inertia tensor. Applies `massOverride` and `inertiaTensorOverride` at Start so the Rigidbody has realistic mass properties (200 kg, I = 80 kg·m² per axis).
-- `RCSModel.cs` — 12-thruster model. Bits 0–5 = translation (+X/-X/+Y/-Y/+Z/-Z), bits 6–11 = rotation (+pitch/-pitch/+yaw/-yaw/+roll/-roll). Torques applied in **body frame** using `transform.right/up/forward`. Keyboard maps to bitmask; `SetThrusterCommand(int mask, float duration)` is the cFS integration hook. Unity auto-cuts the thruster when `Time.fixedTime >= burnEndTime`, so cFS never sends a stop packet.
+- `VehicleState.cs` — central interface for all scripts; exposes position, velocity, attitude, angular velocity, mass, inertia tensor. Mass is set directly on the Rigidbody in the Inspector (4500 kg — Dragon 2 capsule + trunk + crew). Inertia is **computed automatically** each `Start()` from mass + shape (`shapeRadius`/`shapeLength`, a solid-cylinder approximation: I_roll = ½mr², I_pitch/yaw = m(3r²+l²)/12) — Unity's mesh-derived inertia is not used, since it assumes uniform density, which is wrong for a spacecraft with concentrated mass (heat shield, engines, batteries). `centerOfMassOverride` similarly overrides the mesh centroid when non-zero.
+- `RCSModel.cs` — 16 physical thrusters (T00–T15), each defined by a body-frame position + direction vector; T00–T03 are orbital retrograde thrusters excluded from docking maneuvers. A thruster firing produces coupled force **and** torque via Unity's `AddForceAtPosition` (equivalent to `r × F`) — no isolated "pure translation" or "pure rotation" bits. `ThrusterAllocator.cs` builds the 6×N effectiveness matrix and its pseudo-inverse once at startup; `SetWrenchCommand(Vector3 force, Vector3 torque, float duration)` is the cFS integration hook, mapping a desired wrench onto individual thruster on/off states (Draco thrusters are binary — full thrust or off). Unity auto-cuts each thruster when `Time.fixedTime >= burnEndTime`, so cFS never sends a stop packet. See Phase 6 below and [RCS_THRUSTER_REFERENCE.md](RCS_THRUSTER_REFERENCE.md) for the full geometry.
 - `ClohessyWiltshire.cs` — Clohessy-Wiltshire orbital mechanics equations apply a differential gravity force to the chaser each FixedUpdate, producing realistic relative-motion drift when no thrusters fire. World axes approximate LVLH because the target is kinematic/stationary. Mean motion n = 0.00113 rad/s (ISS LEO).
 - `SimManager.cs` — throttled console logging of relative state.
 
 Key physics decisions:
 - Both vehicle BoxColliders set to `Is Trigger = true` — prevents bounce/tumble on contact; docking is detected in software, not by physics collision response.
-- Rigidbody inertia set explicitly via `inertiaTensorOverride` on VehicleState; Unity's auto-computed inertia from collider geometry is not used.
-- **Vehicle mass is 200 kg and thruster force is 10 N** — these values must match `GNC_VEHICLE_MASS` and `GNC_THRUSTER_FORCE` in `gnc_app.h` exactly, or the GNC will systematically under- or over-shoot every burn.
+- Rigidbody inertia is computed from mass + shape rather than left to Unity's mesh-derived default (see `VehicleState.cs` above).
+- **Vehicle mass is 4500 kg and thruster force is 400 N** — these values must match `VehicleMass` and `ThrusterForce` in `GNC_ParamTbl_t` (`gnc_param_tbl.c`) exactly, or the GNC will systematically under- or over-shoot every burn.
 
 ### Phase 2 — Docking Infrastructure (complete)
 Define what "docked" means and visualize the approach.
@@ -91,7 +99,7 @@ Close the loop: Unity sends telemetry, cFS runs the GNC law, sends timed thruste
 Rather than binary on/off mode (thruster ON for a full 1 s cycle), the GNC computes a proportional burn duration each cycle:
 
 ```
-duration = delta_v_needed / thruster_accel     (thruster_accel = F/m = 10/200 = 0.05 m/s²)
+duration = delta_v_needed / thruster_accel     (thruster_accel = F/m = 400/4500 ≈ 0.089 m/s²)
 ```
 
 Unity fires each commanded thruster for exactly `duration` seconds, then auto-cuts. This eliminates the bang-bang limit cycling that binary mode causes.
@@ -101,12 +109,12 @@ Unity fires each commanded thruster for exactly `duration` seconds, then auto-cu
 | Phase | Value | Trigger | Control law |
 |-------|-------|---------|-------------|
 | `GNC_PHASE_IDLE` | 0 | No telemetry / AbortLatch set | All thrust inhibited |
-| `GNC_PHASE_CORRECT` | 1 | LateralOffset > 1.0 m | Station-keep axially; drive Pos_X/Y to zero |
-| `GNC_PHASE_APPROACH` | 2 | LateralOffset < 0.5 m | Proportional axial closure + lateral position hold |
+| `GNC_PHASE_CORRECT` | 1 | LateralOffset > `LatCorrectGate` (1.50 m default) | Station-keep axially; drive Pos_X/Y to zero |
+| `GNC_PHASE_APPROACH` | 2 | LateralOffset < `LatApproachGate` (1.00 m default) | Tiered proportional axial closure (see Phase 5C/5G) + lateral velocity damping |
 | `GNC_PHASE_DOCKED` | 3 | Flags bit 1 set | All thrust inhibited |
-| `GNC_PHASE_HOLD` | 4 | Ground HOLD command | Station-keep; await GO |
+| `GNC_PHASE_HOLD` | 4 | Ground HOLD command, or an autonomous hold-point range (Phase 5C) | Station-keep with position + velocity feedback toward the range captured at HOLD entry (Phase 5G) |
 
-Hysteresis pair (0.5 m / 1.0 m) prevents rapid phase toggling. Every transition generates a `GNC_APP_PHASE_INF_EID` EVS event. Current phase is published in HK telemetry and in the cFS→Unity command packet (see UDP format below).
+The `LatApproachGate`/`LatCorrectGate` hysteresis pair prevents rapid phase toggling. Every transition generates a `GNC_APP_PHASE_INF_EID` EVS event. Current phase is published in HK telemetry and in the cFS→Unity command packet (see UDP format below).
 
 **SCH_LAB scheduler:** TickRate = 10 (10 Hz wall clock). GNC wakeup MID 0x1894 fires at PacketRate = 10 → 1 Hz guidance loop rate.
 
@@ -132,29 +140,37 @@ All GNC gains moved from compiled `#define` constants into a `CFE_TBL`-managed s
 
 | File | Purpose |
 |------|---------|
-| `fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` struct (16 floats, 64 bytes) |
+| `fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` struct (24 floats, 96 bytes) |
 | `fsw/tables/gnc_param_tbl.c` | Default table values + `CFE_TBL_FILEDEF` macro |
 
-**Fields in `GNC_ParamTbl_t`:**
+**Fields in `GNC_ParamTbl_t`** (current defaults — see [DEV_REFERENCE.md](DEV_REFERENCE.md) for the full role of each in the control law):
 
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `AxialKp` | 0.02 | Target closing speed = KP × range (m/s per m) |
-| `MinCloseSpeed` | 0.02 m/s | Floor on approach speed |
-| `MaxCloseSpeed` | 0.30 m/s | Cap on approach speed |
-| `ThrusterForce` | 10.0 N | Must match Unity RCSModel.thrusterForce |
-| `VehicleMass` | 200.0 kg | Must match Unity Rigidbody mass |
-| `RotAccel` | 0.1875 rad/s² | (10 N × 1.5 m moment arm) / 80 kg·m² — must match Unity geometry |
+| `MinCloseSpeed` | 0.10 m/s | Floor on approach speed — holds a constant soft-capture speed for the final stretch instead of tapering to near-zero |
+| `MaxCloseSpeed` | 0.30 m/s | Outer closing-speed cap, before `HoldPoint1_m` fires |
+| `MaxCloseSpeed_Inner` | 0.10 m/s | Tighter closing-speed cap once `HoldPoint1_m` has fired (Phase 5G) |
+| `ThrusterForce` | 400.0 N | Must match Unity `RCSModel.thrusterForce` (real Draco thruster) |
+| `VehicleMass` | 4500.0 kg | Must match Unity Rigidbody mass (Dragon 2 capsule + trunk + crew) |
+| `RotAccel` | 0.033 rad/s² | Empirical — must match Unity thruster/inertia geometry |
 | `MinBurnDuration` | 0.050 s | Shorter pulses coast (dead-band) |
 | `MaxBurnDuration` | 0.950 s | Cap so thruster stops before next 1 Hz tick |
-| `LatKp` | 0.05 | Lateral speed = KP × position error (m/s per m) |
-| `MaxLatSpeed` | 0.10 m/s | Lateral speed cap |
-| `LatApproachGate` | 0.50 m | Enter APPROACH when lateral offset drops below this |
-| `LatCorrectGate` | 1.00 m | Enter CORRECT when lateral offset rises above this |
-| `HoldPoint1_m` | 10.0 m | Outer autonomous waypoint (0 = disabled) |
+| `LatKp` | 0.02 | Lateral speed = KP × position error (m/s per m) |
+| `MaxLatSpeed` | 0.05 m/s | Lateral speed cap |
+| `LatApproachGate` | 1.00 m | Enter APPROACH when lateral offset drops below this |
+| `LatCorrectGate` | 1.50 m | Enter CORRECT when lateral offset rises above this |
+| `HoldPoint1_m` | 20.0 m | Outer autonomous waypoint (0 = disabled) |
 | `HoldPoint2_m` | 3.0 m | Inner autonomous waypoint (0 = disabled) |
-| `AttKp` | 0.50 (rad/s)/rad | Attitude proportional gain |
+| `AttKp` | 0.25 (rad/s)/rad | Attitude proportional gain |
 | `MaxAttRate` | 0.20 rad/s | Cap on commanded angular rate per axis |
+| `AttDeadband_deg` | 2.0° | Skip attitude correction when all three axis errors are below this and not spinning |
+| `LatVelDeadband_ms` | 0.015 m/s | Skip lateral correction when velocity error is below this (prevents bang-bang chatter) |
+| `BrakeAccel_Hard_mss` | 0.281 m/s² | Empirical deceleration from T08–T15 (hard stop) |
+| `BrakeAccel_Light_mss` | 0.136 m/s² | Empirical deceleration from T08–T11 only (soft correction) |
+| `ApproachAccel_mss` | 0.163 m/s² | Empirical acceleration from the T04–T07 approach group |
+| `AxialHoldKp` | 0.02 | HOLD-phase axial position gain: target closing speed = KP × (Range_m − HoldRange_m) (Phase 5G) |
+| `MaxHoldSpeed` | 0.05 m/s | Cap on HOLD-phase axial position-correction speed (Phase 5G) |
 
 ### Phase 5C — Autonomous Hold Points (complete)
 
@@ -210,6 +226,20 @@ Per-axis (pitch/yaw/roll) independently. Thruster bit map: +pitch=6, -pitch=7, +
 - Per-axis PITCH / YAW / ROLL error rows (green ≤ ±5°, red > ±5°), indented under the scalar ATTITUDE row.
 - GNC phase row — color-coded: gray=IDLE, yellow=CORRECT, cyan=APPROACH, green=DOCKED, orange=HOLD. Shows `---` when cFS is not connected.
 - RDM row shows `SUPPRESSED` when cFS has authority.
+
+### Phase 5G — Axial Hold-Position Control & Tiered Approach Speed (complete)
+
+Two related fixes to the HOLD and APPROACH control laws, driven by observed drift during a station-keep and a comparison against real Dragon docking telemetry:
+
+**Axial hold-position control.** The HOLD-phase axial channel previously only zeroed target closing speed (pure velocity damping), with no position feedback — so any range drift accumulated during a hold (imperfect braking, residual CW drift) was never corrected back out. `GNC_APP_Data.HoldRange_m` now captures the range at the moment HOLD is entered (autonomous hold-point fire or ground `HOLD` command), and the axial channel adds proportional position feedback toward it:
+
+```
+v_axial_tgt = clamp(AxialHoldKp × (Range_m − HoldRange_m), ±MaxHoldSpeed)
+```
+
+identical in structure to the existing lateral position controller.
+
+**Tiered approach speed.** `MaxCloseSpeed` (0.30 m/s) now applies only before `HoldPoint1_m` fires; once it fires (and stays fired until an ABORT+GO re-arms it), the axial closing-speed cap in APPROACH drops to the tighter `MaxCloseSpeed_Inner` (0.10 m/s) for the remainder of the approach. Combined with raising `MinCloseSpeed` to 0.10 m/s (so the proportional taper floors out at the same value instead of continuing to decay toward zero), this reproduces the outer/inner closing-rate profile — and the roughly constant ~0.1 m/s terminal rate through soft capture — visible on real SpaceX Dragon docking telemetry. `HoldPoint1_m` was also moved from 10 m to 20 m to match the observed outer hold range.
 
 ---
 
@@ -269,13 +299,13 @@ Unity's `ThrusterAllocator` pseudo-inverse maps the wrench to physical thrusters
 
 This mirrors how real spacecraft GNC actually works: the guidance law computes desired `[Fx, Fy, Fz, Tx, Ty, Tz]`, a separate control allocator maps that wrench to individual thruster on-times, and each thruster inherently couples translation and rotation.
 
-### 6-1 — Thruster Geometry Definition
-Define all 12 physical thrusters as position + direction vectors in Dragon's body frame. Validate with Scene-view gizmos before any behavior changes.
+### 6-1 — Thruster Geometry Definition (complete)
+Define all 16 physical thrusters (T00–T15) as position + direction vectors in Dragon's body frame. See [RCS_THRUSTER_REFERENCE.md](RCS_THRUSTER_REFERENCE.md) for the full per-thruster table.
 
 **Touches:** `RCSModel.cs` (thruster data array)
 
-### 6-2 — Coupled Physics in Unity
-Replace the switch-case force/torque block with a loop: for each active thruster bit, `AddForce(dir * F)` and `AddTorque(cross(pos, dir) * F)`. Keyboard control works immediately; you can already observe that translation thrusters slightly rotate the ship.
+### 6-2 — Coupled Physics in Unity (complete)
+Each active thruster applies its force at its world-space position via `Rigidbody.AddForceAtPosition`, which is physically equivalent to `AddForce(dir * F)` + `AddTorque(cross(pos, dir) * F)` — translation thrusters inherently produce a small coupled torque, exactly as real RCS jets do.
 
 **Touches:** `RCSModel.cs`
 
@@ -292,14 +322,15 @@ Changed the cFS → Unity command packet from `mask(int32) + duration(float) + p
 ### 6-5 — GNC Wrench Output in cFS (complete)
 `GNC_Control_t` changed from `{mask, duration}` to `{Fx, Fy, Fz, Tx, Ty, Tz, duration}`. `GNC_APP_ComputeControl()` now sets signed force/torque components directly instead of bit-flags. `GNC_APP_SendCommand()` packs the wrench struct directly into the 32-byte UDP packet — no mask→wrench conversion. The WAKEUP_INF log now shows `F=(x,y,z) T=(x,y,z) Dur=s` instead of `Cmd=0xXXX`.
 
-**Known limitation:** Fx and Fy from the lateral correction channel are zeroed by Unity's `SetWrenchCommand` (the Dragon pod geometry maps lateral force requests to yaw thrusters, causing divergence). Lateral correction effectively coasts until the thruster geometry is fixed (Phase 7).
-
 **Touches:** `gnc_app.c`, `gnc_app.h`, `gnc_app_udp.c`
 
-### 6-6 — Stuck Thruster Fault Injection
+### 6-6 — Stuck Thruster Fault Injection (not started)
 Add a fault mode to `RCSModel.cs`: mark one or more thrusters as stuck-on. A stuck thruster fires every `FixedUpdate` regardless of commanded state, producing a genuine coupled disturbance (off-axis force + torque) that the GNC must sense and fight. This is the educational payoff of the full overhaul — a realistic fault the closed-loop system has to handle.
 
 **Touches:** `RCSModel.cs` (fault flags, Inspector toggles)
+
+### Diagnostic tooling (in progress)
+`ThrusterDiagnostic.cs` (F8 in Play mode) automates the empirical calibration described in `gnc_param_tbl.c`'s braking-constant comments: it fires each translational/attitude thruster group at two burn durations and logs delta-V / delta-omega (plus off-axis coupling) with a `[DIAG]` prefix, so `ApproachAccel_mss`, `BrakeAccel_Hard_mss`, etc. can be re-measured directly instead of by hand from wakeup-log telemetry. Run cFS in ABORT/IDLE first so UDP commands don't interfere.
 
 ---
 
@@ -347,10 +378,14 @@ Add a fault mode to `RCSModel.cs`: mark one or more thrusters as stuck-on. A stu
 | R / F      | Pitch up / down     |
 | E / Q      | Yaw right / left    |
 | Z / X      | Roll CW / CCW       |
+| T          | Toggle force suppression (debug) |
 | H          | Toggle Rate Damping (suppressed while cFS active) |
 | Backspace  | Reset scenario      |
-| Arrow keys | Articulate camera   |
+| 1 / 2 / 3 / 4 | Switch camera (nose/docking, ISS cam A/B, chase cam) |
+| Arrow keys | Articulate active camera |
 | Enter      | Center camera       |
+| `` ` `` (backtick) | Toggle single-thruster test mode (number keys fire individual thrusters) |
+| F8         | Run automated thruster calibration diagnostic (`ThrusterDiagnostic.cs`) |
 
 ---
 

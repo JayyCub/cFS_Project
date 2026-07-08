@@ -54,6 +54,12 @@ public class RCSModel : MonoBehaviour
     private ThrusterDef[]     _thrusters = new ThrusterDef[0];
     // Per-thruster throttle in Newtons (0..thrusterForce).  Primary command state.
     private float[]           _throttles = new float[0];
+    // Per-thruster pulse-width modulation: thruster i fires at full thrusterForce
+    // until Time.fixedTime reaches this value, then turns off. This is what lets
+    // external (wrench) commands give each thruster its own on-duration instead of
+    // firing every commanded thruster at full power for the same shared duration —
+    // see SetWrenchCommand for why that distinction matters.
+    private float[]           _pulseEndTime = new float[0];
     private Rigidbody         _rb;
     private ThrusterAllocator _allocator;
 
@@ -102,7 +108,8 @@ public class RCSModel : MonoBehaviour
         // Only pre-allocate here. BuildThrusterArray() is deferred to Start() via coroutine
         // so that VehicleState.Start() has already applied centerOfMassOverride before we
         // compute moment arms for the B matrix.
-        _throttles = new float[0];
+        _throttles    = new float[0];
+        _pulseEndTime = new float[0];
     }
 
     void Start()
@@ -121,7 +128,8 @@ public class RCSModel : MonoBehaviour
             _rb = vehicle.GetComponent<Rigidbody>();
 
         BuildThrusterArray();
-        _throttles = new float[_thrusters.Length];
+        _throttles    = new float[_thrusters.Length];
+        _pulseEndTime = new float[_thrusters.Length];
 
         if (_thrusters.Length > 0)
         {
@@ -240,9 +248,17 @@ public class RCSModel : MonoBehaviour
 
     void FixedUpdate()
     {
-        // Let an external burn coast once its duration expires.
-        if (externalControl && Time.fixedTime >= burnEndTime)
-            System.Array.Clear(_throttles, 0, _throttles.Length);
+        // External control: each thruster fires independently until its own
+        // _pulseEndTime, giving each one its own on-duration within the commanded
+        // window (see SetWrenchCommand). Time.fixedTime >= burnEndTime is a hard
+        // backstop — every individual pulse ends at or before it by construction,
+        // but this guarantees nothing can fire past the commanded window.
+        if (externalControl)
+        {
+            bool expired = Time.fixedTime >= burnEndTime;
+            for (int i = 0; i < _throttles.Length && i < _pulseEndTime.Length; i++)
+                _throttles[i] = (!expired && Time.fixedTime < _pulseEndTime[i]) ? thrusterForce : 0f;
+        }
 
         if (vehicle == null || _thrusters.Length == 0 || _rb == null) return;
         if (suppressForces) return;
@@ -265,21 +281,21 @@ public class RCSModel : MonoBehaviour
 
     /// <summary>
     /// Binary mask command used by ThrusterTestUI and legacy paths.
-    /// Selected thrusters fire at full thrusterForce; others are zeroed.
+    /// Selected thrusters fire at full thrusterForce for the full duration; others are zeroed.
     /// </summary>
     public void SetThrusterCommand(int mask, float duration)
     {
         externalControl = true;
         burnEndTime     = Time.fixedTime + duration;
         EnsureThrottleArray();
-        for (int i = 0; i < _throttles.Length && i < 32; i++)
-            _throttles[i] = (mask & (1 << i)) != 0 ? thrusterForce : 0f;
+        for (int i = 0; i < _pulseEndTime.Length && i < 32; i++)
+            _pulseEndTime[i] = (mask & (1 << i)) != 0 ? Time.fixedTime + duration : Time.fixedTime;
     }
 
     /// <summary>
     /// Proportional wrench command from cFS.  The pseudo-inverse allocates the
-    /// desired force/torque across all thrusters and stores fractional throttle
-    /// levels so their torques cancel — achieving clean 6-DOF translation.
+    /// desired force/torque across all thrusters as a fractional Newtons-per-thruster
+    /// solution whose off-axis components cancel — achieving clean 6-DOF translation.
     /// </summary>
     // Force magnitude below this threshold is treated as a light brake command (T08-T11 only).
     // cFS sends BrakeAccel_Light_mss * VehicleMass (0.136 × 4500 = 612 N) for fine corrections
@@ -306,13 +322,9 @@ public class RCSModel : MonoBehaviour
 
         float[] raw = _allocator.Allocate(force, torque);
 
-        // Binary on/off: consistent with Draco hardware behaviour.
-        for (int i = 0; i < raw.Length && i < _throttles.Length; i++)
-            _throttles[i] = raw[i] > 1e-4f ? thrusterForce : 0f;
-
         // T00–T03 are orbital retrograde thrusters — never used for docking maneuvers.
-        for (int i = 0; i < Mathf.Min(4, _throttles.Length); i++)
-            _throttles[i] = 0f;
+        for (int i = 0; i < Mathf.Min(4, raw.Length); i++)
+            raw[i] = 0f;
 
         // Brake group selection: cFS sends a smaller force magnitude for gentle corrections
         // (soft brake = T08-T11 only) vs hard stops (all 8 = T08-T15).
@@ -321,8 +333,25 @@ public class RCSModel : MonoBehaviour
         if (force.z < -0.5f && force.z > -SoftBrakeThreshold_N &&
             Mathf.Abs(force.x) < 1f && Mathf.Abs(force.y) < 1f)
         {
-            for (int i = 12; i < Mathf.Min(16, _throttles.Length); i++)
-                _throttles[i] = 0f;
+            for (int i = 12; i < Mathf.Min(16, raw.Length); i++)
+                raw[i] = 0f;
+        }
+
+        // Per-thruster pulse-width modulation: each thruster fires at full power for
+        // only the fraction of the commanded duration proportional to its own share
+        // of the pseudo-inverse solution (clamped to the window — a thruster asked
+        // for more than thrusterForce just stays on the whole time), instead of every
+        // thruster the allocator touched firing at full power for the whole window.
+        // That flattening is what broke the allocator's cancellation: e.g. a light
+        // lateral thruster and a heavy forward thruster commanded together used to
+        // both fire at full thrusterForce for the same duration, distorting the
+        // ratio the pseudo-inverse solved for and leaking into the axial/attitude
+        // channels as unmodeled coupling.
+        for (int i = 0; i < raw.Length && i < _pulseEndTime.Length; i++)
+        {
+            float need      = Mathf.Clamp(raw[i], 0f, thrusterForce);
+            float pulseTime = duration * (need / thrusterForce);
+            _pulseEndTime[i] = pulseTime > 1e-4f ? Time.fixedTime + pulseTime : Time.fixedTime;
         }
     }
 
@@ -332,12 +361,15 @@ public class RCSModel : MonoBehaviour
         burnEndTime     = -1f;
         EnsureThrottleArray();
         System.Array.Clear(_throttles, 0, _throttles.Length);
+        System.Array.Clear(_pulseEndTime, 0, _pulseEndTime.Length);
     }
 
     void EnsureThrottleArray()
     {
         if (_throttles == null || _throttles.Length != _thrusters.Length)
             _throttles = new float[_thrusters.Length];
+        if (_pulseEndTime == null || _pulseEndTime.Length != _thrusters.Length)
+            _pulseEndTime = new float[_thrusters.Length];
     }
 
     // ── Gizmos ───────────────────────────────────────────────────────────────

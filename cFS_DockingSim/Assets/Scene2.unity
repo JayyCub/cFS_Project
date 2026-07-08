@@ -49770,8 +49770,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1569440113}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -32}
+  m_LocalRotation: {x: 0.12514961, y: -0.09052547, z: 0.19095013, w: 0.9693713}
+  m_LocalPosition: {x: 4.28, y: 0.8, z: -34.09}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -49795,7 +49795,7 @@ Transform:
   - {fileID: 688609617}
   - {fileID: 1758605400}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 16.093, y: -7.638, z: 21.206}
 --- !u!114 &1569440121
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -79141,6 +79141,7 @@ MonoBehaviour:
   corridor: {fileID: 2028270417}
   chaser: {fileID: 1569440115}
   cfsReceiver: {fileID: 725698973}
+  hudRefreshInterval: 0.1
 --- !u!114 &2028270414
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -79194,6 +79195,7 @@ MonoBehaviour:
   corridor: {fileID: 2028270417}
   detector: {fileID: 2028270414}
   logInterval: 0.1
+  flushInterval: 5
 --- !u!114 &2028270417
 MonoBehaviour:
   m_ObjectHideFlags: 0

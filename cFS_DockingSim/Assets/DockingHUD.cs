@@ -24,6 +24,21 @@ public class DockingHUD : MonoBehaviour
     const int   FS    = 12;
     const int   FS_SM = 11;
 
+    // ── formatted-text cache ────────────────────────────────────────────────
+    // OnGUI runs every frame (twice, for Layout + Repaint); reformatting ~15
+    // interpolated strings each time was a measurable source of per-frame GC
+    // allocation. The values only need to look live, not literally recompute
+    // every frame, so formatting is throttled to hudRefreshInterval and OnGUI
+    // just redraws the cached strings every frame (no visible staleness/flicker,
+    // since something is drawn every frame either way).
+    [Tooltip("Seconds between HUD text reformatting (drawing itself still happens every frame).")]
+    public float hudRefreshInterval = 0.1f;   // 10 Hz — matches TelemetryLogger's cadence
+    private float _nextHudRefresh;
+
+    private string _cRange, _cClosing, _cLateral, _cAttitude, _cPitchErr, _cYawErr, _cRollErr, _cCorridor;
+    private string _cStateRollAng, _cStateRollRate, _cStatePitchAng, _cStatePitchRate, _cStateYawAng, _cStateYawRate;
+    private string _cVx, _cVy, _cVz;
+
     void OnDestroy() { if (_bg != null) Destroy(_bg); }
 
     void InitStyles()
@@ -51,9 +66,54 @@ public class DockingHUD : MonoBehaviour
     {
         if (nav == null) return;
         InitStyles();
+        if (Time.time >= _nextHudRefresh)
+        {
+            _nextHudRefresh = Time.time + hudRefreshInterval;
+            RefreshHudCache();
+        }
         DrawDockingPanel();
         DrawControlsLegend();
         DrawStatePanel();
+    }
+
+    // Reformats every displayed numeric field at hudRefreshInterval instead of every
+    // frame. Thresholds/colors are cheap (plain comparisons) and stay live in the
+    // Draw* methods below — only the string interpolation is throttled here.
+    void RefreshHudCache()
+    {
+        _cRange    = $"{nav.range:F2} m";
+        _cClosing  = $"{nav.closingSpeed:+0.000;-0.000} m/s";
+        _cLateral  = $"{nav.lateralOffset:F3} m";
+        _cAttitude = $"{nav.attitudeError:F1} deg";
+        _cPitchErr = $"{nav.pitchError:+0.0;-0.0} deg";
+        _cYawErr   = $"{nav.yawError:+0.0;-0.0} deg";
+        _cRollErr  = $"{nav.rollError:+0.0;-0.0} deg";
+        if (corridor != null)
+            _cCorridor = $"{corridor.corridorAngle:F1}  {(corridor.inCorridor ? "IN" : "OUT")}";
+
+        if (chaser == null) return;
+
+        Vector3 euler = chaser.attitude.eulerAngles;
+        float roll    = Normalize(euler.z);
+        float pitch   = Normalize(euler.x);
+        float yaw     = Normalize(euler.y);
+
+        Vector3 bodyAngVel = Quaternion.Inverse(chaser.attitude) * chaser.angularVelocity;
+        float rollRate  = bodyAngVel.z * Mathf.Rad2Deg;
+        float pitchRate = bodyAngVel.x * Mathf.Rad2Deg;
+        float yawRate   = bodyAngVel.y * Mathf.Rad2Deg;
+
+        Vector3 bodyVel = Quaternion.Inverse(chaser.attitude) * chaser.velocity;
+
+        _cStateRollAng   = $"{roll:+0.0;-0.0} deg";
+        _cStateRollRate  = $"{rollRate:+0.0;-0.0} d/s";
+        _cStatePitchAng  = $"{pitch:+0.0;-0.0} deg";
+        _cStatePitchRate = $"{pitchRate:+0.0;-0.0} d/s";
+        _cStateYawAng    = $"{yaw:+0.0;-0.0} deg";
+        _cStateYawRate   = $"{yawRate:+0.0;-0.0} d/s";
+        _cVx = $"{bodyVel.x:+0.000;-0.000} m/s";
+        _cVy = $"{bodyVel.y:+0.000;-0.000} m/s";
+        _cVz = $"{bodyVel.z:+0.000;-0.000} m/s";
     }
 
     // ── shared helpers ────────────────────────────────────────────────────────
@@ -116,37 +176,29 @@ public class DockingHUD : MonoBehaviour
         float y = py + PAD;
         SectionHeader(px, ref y, pw, "DOCKING");
 
-        DataRow(px, ref y, LBL, VAL, "RANGE",
-            $"{nav.range:F2} m",
+        DataRow(px, ref y, LBL, VAL, "RANGE", _cRange,
             nav.range <= tRange ? Color.green : Color.red);
 
-        DataRow(px, ref y, LBL, VAL, "CLOSING",
-            $"{nav.closingSpeed:+0.000;-0.000} m/s",
+        DataRow(px, ref y, LBL, VAL, "CLOSING", _cClosing,
             nav.closingSpeed > 0f && nav.closingSpeed <= tClosing ? Color.green : Color.red);
 
-        DataRow(px, ref y, LBL, VAL, "LATERAL",
-            $"{nav.lateralOffset:F3} m",
+        DataRow(px, ref y, LBL, VAL, "LATERAL", _cLateral,
             nav.lateralOffset <= tLateral ? Color.green : Color.red);
 
-        DataRow(px, ref y, LBL, VAL, "ATTITUDE",
-            $"{nav.attitudeError:F1} deg",
+        DataRow(px, ref y, LBL, VAL, "ATTITUDE", _cAttitude,
             nav.attitudeError <= tAttitude ? Color.green : Color.red);
 
-        DataRow(px, ref y, LBL, VAL, "  PITCH",
-            $"{nav.pitchError:+0.0;-0.0} deg",
+        DataRow(px, ref y, LBL, VAL, "  PITCH", _cPitchErr,
             Mathf.Abs(nav.pitchError) <= tAttAxis ? Color.green : Color.red);
 
-        DataRow(px, ref y, LBL, VAL, "  YAW",
-            $"{nav.yawError:+0.0;-0.0} deg",
+        DataRow(px, ref y, LBL, VAL, "  YAW", _cYawErr,
             Mathf.Abs(nav.yawError) <= tAttAxis ? Color.green : Color.red);
 
-        DataRow(px, ref y, LBL, VAL, "  ROLL",
-            $"{nav.rollError:+0.0;-0.0} deg",
+        DataRow(px, ref y, LBL, VAL, "  ROLL", _cRollErr,
             Mathf.Abs(nav.rollError) <= tAttAxis ? Color.green : Color.red);
 
         if (showCorridor)
-            DataRow(px, ref y, LBL, VAL, "CORRIDOR",
-                $"{corridor.corridorAngle:F1}  {(corridor.inCorridor ? "IN" : "OUT")}",
+            DataRow(px, ref y, LBL, VAL, "CORRIDOR", _cCorridor,
                 corridor.inCorridor ? Color.green : Color.red);
 
         if (showRdm)
@@ -217,18 +269,6 @@ public class DockingHUD : MonoBehaviour
     {
         if (chaser == null) return;
 
-        Vector3 euler = chaser.attitude.eulerAngles;
-        float roll    = Normalize(euler.z);
-        float pitch   = Normalize(euler.x);
-        float yaw     = Normalize(euler.y);
-
-        Vector3 bodyAngVel = Quaternion.Inverse(chaser.attitude) * chaser.angularVelocity;
-        float rollRate  = bodyAngVel.z * Mathf.Rad2Deg;
-        float pitchRate = bodyAngVel.x * Mathf.Rad2Deg;
-        float yawRate   = bodyAngVel.y * Mathf.Rad2Deg;
-
-        Vector3 bodyVel = Quaternion.Inverse(chaser.attitude) * chaser.velocity;
-
         const float LBL = 46f, ANG = 74f, RATE = 84f;
         float pw = LBL + ANG + RATE + PAD * 2;
         float ph = PAD + HLINE + 3 * LINE + 4f + 3 * LINE + PAD;
@@ -241,36 +281,36 @@ public class DockingHUD : MonoBehaviour
         SectionHeader(px, ref y, pw, "VEHICLE STATE");
 
         Color attColor = new Color(0.78f, 0.78f, 1.00f, 1f);
-        AttRow(px, ref y, LBL, ANG, RATE, "ROLL",  roll,  rollRate,  attColor);
-        AttRow(px, ref y, LBL, ANG, RATE, "PITCH", pitch, pitchRate, attColor);
-        AttRow(px, ref y, LBL, ANG, RATE, "YAW",   yaw,   yawRate,   attColor);
+        AttRow(px, ref y, LBL, ANG, RATE, "ROLL",  _cStateRollAng,  _cStateRollRate,  attColor);
+        AttRow(px, ref y, LBL, ANG, RATE, "PITCH", _cStatePitchAng, _cStatePitchRate, attColor);
+        AttRow(px, ref y, LBL, ANG, RATE, "YAW",   _cStateYawAng,   _cStateYawRate,   attColor);
 
         y += 4f;
 
         Color velColor = new Color(1f, 0.88f, 0.55f, 1f);
-        VelRow(px, ref y, LBL, ANG + RATE, "Vx", bodyVel.x, velColor);
-        VelRow(px, ref y, LBL, ANG + RATE, "Vy", bodyVel.y, velColor);
-        VelRow(px, ref y, LBL, ANG + RATE, "Vz", bodyVel.z, velColor);
+        VelRow(px, ref y, LBL, ANG + RATE, "Vx", _cVx, velColor);
+        VelRow(px, ref y, LBL, ANG + RATE, "Vy", _cVy, velColor);
+        VelRow(px, ref y, LBL, ANG + RATE, "Vz", _cVz, velColor);
     }
 
     void AttRow(float px, ref float y, float lblW, float angW, float rateW,
-                string label, float angle, float rate, Color color)
+                string label, string angleText, string rateText, Color color)
     {
         _style.normal.textColor = new Color(0.62f, 0.62f, 0.62f, 1f);
         GUI.Label(new Rect(px + PAD, y, lblW, LINE), label, _style);
         _styleRight.normal.textColor = color;
-        GUI.Label(new Rect(px + PAD + lblW,        y, angW  - 2f, LINE), $"{angle:+0.0;-0.0} deg", _styleRight);
-        GUI.Label(new Rect(px + PAD + lblW + angW, y, rateW - PAD, LINE), $"{rate:+0.0;-0.0} d/s",  _styleRight);
+        GUI.Label(new Rect(px + PAD + lblW,        y, angW  - 2f, LINE), angleText, _styleRight);
+        GUI.Label(new Rect(px + PAD + lblW + angW, y, rateW - PAD, LINE), rateText,  _styleRight);
         y += LINE;
     }
 
     void VelRow(float px, ref float y, float lblW, float valW,
-                string label, float vel, Color color)
+                string label, string valueText, Color color)
     {
         _style.normal.textColor = new Color(0.62f, 0.62f, 0.62f, 1f);
         GUI.Label(new Rect(px + PAD, y, lblW, LINE), label, _style);
         _styleRight.normal.textColor = color;
-        GUI.Label(new Rect(px + PAD + lblW, y, valW - PAD, LINE), $"{vel:+0.000;-0.000} m/s", _styleRight);
+        GUI.Label(new Rect(px + PAD + lblW, y, valW - PAD, LINE), valueText, _styleRight);
         y += LINE;
     }
 

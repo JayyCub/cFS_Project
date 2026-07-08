@@ -20,7 +20,12 @@ public class TelemetryLogger : MonoBehaviour
 
     private StreamWriter writer;
     private float        nextLog;
+    private float        nextFlush;
     private float        missionTime;
+
+    [Tooltip("Seconds between disk flushes (data-loss safety net on an unclean exit; " +
+             "kept far less frequent than logInterval so it doesn't stall the frame).")]
+    public float flushInterval = 5.0f;
 
     void Start()
     {
@@ -70,7 +75,15 @@ public class TelemetryLogger : MonoBehaviour
             $"{angVel.x:F6},{angVel.y:F6},{angVel.z:F6}," +
             $"{(inCorridor ? 1 : 0)},{(docked ? 1 : 0)}"
         );
-        writer.Flush();
+        // No per-write Flush() here — StreamWriter buffers internally, and an explicit
+        // Flush() at 10Hz forces a synchronous disk write every call, which was stalling
+        // the main thread (observed as FPS dips). Flushed periodically below instead,
+        // and on clean shutdown via OnDestroy() -> Close().
+        if (Time.time >= nextFlush)
+        {
+            nextFlush = Time.time + flushInterval;
+            writer.Flush();
+        }
     }
 
     void OnDestroy()

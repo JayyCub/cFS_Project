@@ -339,3 +339,23 @@ First, proper RCS thruster plumes. Each of the 16 Draco thrusters now emits a pa
 Second, a multi-camera system. The sim now has four switchable cameras: the original nose/docking cam (key `1`), two manually-placed ISS robotic cameras that can pan and zoom (keys `2` and `3`), and a third-person chase cam that smoothly follows Dragon from behind (key `4`). A small HUD in the corner always shows which camera is active. The screenshot below is the ISS approach camera looking out at Dragon on final approach with plumes firing.
 
 ![ISS approach camera — Dragon on approach with RCS plumes](Docs/Unity_Scene_img5.png)
+
+**July 21st Update: Dual-Mode Stream/Utility UI**
+
+Replaced the old IMGUI debug overlay with a proper Canvas-based HUD with two modes. Stream mode is the compact overlay meant for recording — just the essentials plus a thruster-firing ring. Utility mode is for actually debugging a run: three collapsible slide-out panels (positional/attitude data with per-axis roll/pitch/yaw gauges, a detailed thruster-firing diagram, and a raw command/condition debug panel), each tucked out of the way behind a pull-tab when you don't need it.
+
+CORRECT phase, 25.82 m out, station-keeping axially while killing lateral drift:
+
+![Utility UI — CORRECT phase, 25.82m range](Docs/Utility_UI_Correct_Phase.png)
+
+APPROACH phase, 5.34 m out, corridor confirmed:
+
+![Utility UI — APPROACH phase, 5.34m range](Docs/Utility_UI_Approach_5m.png)
+
+APPROACH phase, 2.91 m out, final closure with attitude gauges in frame:
+
+![Utility UI — APPROACH phase, 2.91m range](Docs/Utility_UI_Approach_3m.png)
+
+DOCKED:
+
+![Utility UI — DOCKED](Docs/Utility_UI_Docked.png)

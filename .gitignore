@@ -36,6 +36,9 @@ cFS_DockingSim/.vs/
 # Telemetry log output
 cFS_DockingSim/TelemetryLog_*.csv
 
+# cFS console run logs (run-sim.sh)
+run_logs/
+
 # Blender source files — too large for GitHub without LFS; keep locally only
 *.blend
 *.blend1

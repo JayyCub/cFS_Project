@@ -59,7 +59,7 @@ def send_cmd(name: str) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.sendto(pkt, (CI_LAB_HOST, CI_LAB_PORT))
 
-    print(f"Sent GNC {name.upper()} (FC={fc}) → {CI_LAB_HOST}:{CI_LAB_PORT} ({len(pkt)} bytes)")
+    print(f"Sent GNC {name.upper()} (FC={fc}) -> {CI_LAB_HOST}:{CI_LAB_PORT} ({len(pkt)} bytes)")
 
 
 if __name__ == "__main__":

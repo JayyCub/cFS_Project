@@ -62,6 +62,13 @@ public class UdpCommandReceiver : MonoBehaviour
     /// </summary>
     public int GncPhase { get; private set; } = -1;
 
+    /// <summary>Last wrench actually applied via SetWrenchCommand (for HUD/debug display).
+    /// Zeroed on command timeout so a stale nonzero value never lingers after cFS
+    /// disconnects. Main-thread-only, same as GncPhase — the recv thread never touches these.</summary>
+    public Vector3 LastForce    { get; private set; }
+    public Vector3 LastTorque   { get; private set; }
+    public float   LastDuration { get; private set; }
+
     void Start()
     {
         try
@@ -133,6 +140,10 @@ public class UdpCommandReceiver : MonoBehaviour
             lastCmdTime = Time.time;
             cfsActive   = true;
 
+            LastForce    = force;
+            LastTorque   = torque;
+            LastDuration = duration;
+
             if (debugLog)
                 Debug.Log($"[UdpCommandReceiver] F=({force.x:F1},{force.y:F1},{force.z:F1})N " +
                           $"T=({torque.x:F1},{torque.y:F1},{torque.z:F1})Nm dur={duration:F3}s");
@@ -143,6 +154,8 @@ public class UdpCommandReceiver : MonoBehaviour
             cfsActive = false;
             if (rcsModel != null)
                 rcsModel.ClearExternalControl();
+            LastForce = LastTorque = Vector3.zero;
+            LastDuration = 0f;
             Debug.Log("[UdpCommandReceiver] cFS command timeout — keyboard control restored.");
         }
     }

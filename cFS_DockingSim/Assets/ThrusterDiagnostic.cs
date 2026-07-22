@@ -114,8 +114,9 @@ public class ThrusterDiagnostic : MonoBehaviour
 
         // Brake forces match what cFS actually sends: BrakeAccel × mass.
         // These match gnc_param_tbl.c empirical values — adjust if you retune.
-        float hardBrakeN = 0.281f * m;   // BrakeAccel_Hard_mss × mass
-        float softBrakeN = 0.136f * m;   // BrakeAccel_Light_mss × mass
+        // Updated 2026-07-11 alongside gnc_param_tbl.c for VehicleMass = 12000.
+        float hardBrakeN = 0.189f * m;   // BrakeAccel_Hard_mss × mass
+        float softBrakeN = 0.133f * m;   // BrakeAccel_Light_mss × mass
 
         // label, body-frame force (N), body-frame torque (N·m)
         // Body frame: +Z = toward ISS, +X = right, +Y = up
@@ -142,6 +143,26 @@ public class ThrusterDiagnostic : MonoBehaviour
             // Lateral + approach together (what cFS commands when correcting + drifting)
             ("+Fx+Fz LAT_CORR combo  ", new Vector3( F,  0,  F),           Vector3.zero),
             ("-Fx+Fz LAT_CORR combo  ", new Vector3(-F,  0,  F),           Vector3.zero),
+
+            // ── Combined-demand stress tests ────────────────────────────────────
+            // Reproduces the 2026-07-11 14:03 incident: LAT_CORR at a large lateral
+            // offset commanded Fx=-400,Fy=-400,Fz=+1200,Tx=+600,Ty=-600 all at once
+            // (full lateral burn + spin-rate-override attitude correction + the
+            // LAT_CORR +Fz coupling feedforward), and the axial actuator-health
+            // monitor (gnc_app.c GNC_APP_CheckActuatorHealth) caught ClosingSpeed_ms
+            // going the WRONG direction relative to the commanded +Fz for 100+
+            // cycles. Single/dual-axis cases above never exercise 5 simultaneous
+            // channels competing for the same 16 thrusters — this does.
+            ("5-axis LAT_CORR stress ", new Vector3(-F, -F, 3f * F), new Vector3( F * arm, -F * arm, 0)),
+            ("5-axis stress (mirror) ", new Vector3( F,  F,-3f * F), new Vector3(-F * arm,  F * arm, 0)),
+
+            // Every channel maxed simultaneously — beyond anything GNC would
+            // realistically send, but finds the allocator's real ceiling.
+            ("All-axis max demand    ", new Vector3( F,  F,  F),        new Vector3( F * arm,  F * arm,  F * arm)),
+
+            // Isolates whether simultaneous multi-axis ROTATION alone degrades,
+            // independent of the translation/attitude coupling in the cases above.
+            ("3-axis attitude combo  ", Vector3.zero,                    new Vector3( F * arm,  F * arm,  F * arm)),
         };
 
         _total = cases.Length * 2;
@@ -206,34 +227,66 @@ public class ThrusterDiagnostic : MonoBehaviour
 
     IEnumerator FireAndMeasure(string label, Vector3 force, Vector3 torque, float dur)
     {
-        bool isRotation = (force.sqrMagnitude < 0.01f);
+        bool hasForce  = force.sqrMagnitude  > 0.01f;
+        bool hasTorque = torque.sqrMagnitude > 0.01f;
 
         Vector3 v0 = rb.linearVelocity;
         Vector3 w0 = rb.angularVelocity;
 
         rcs.SetWrenchCommand(force, torque, dur);
-        yield return new WaitForSeconds(dur + 0.05f);  // let burn fully complete in physics
 
-        Vector3 dv    = rb.linearVelocity  - v0;
-        Vector3 dw    = rb.angularVelocity - w0;
-        Vector3 accel = dv / dur;
-        Vector3 alpha = dw / dur;
+        // Poll every physics tick for the duration of the burn, OR-accumulating
+        // which thrusters were active at any point (rcs.CurrentThrusterMask,
+        // bit i = thruster i at >=5% throttle). A single end-of-burn snapshot
+        // would miss thrusters whose individual PWM pulse already ended — this
+        // gives the full set of thrusters the allocator actually used, which is
+        // what you need to tell "allocator dropped thrusters under combined
+        // demand" apart from "allocator delivered a weak but honest solution".
+        int   firedMask = 0;
+        float elapsed   = 0f;
+        float window    = dur + 0.05f;  // let burn fully complete in physics
+        while (elapsed < window)
+        {
+            firedMask |= rcs.CurrentThrusterMask;
+            yield return new WaitForFixedUpdate();
+            elapsed += Time.fixedDeltaTime;
+        }
 
-        if (!isRotation)
-        {
-            Log($"{label,-32} | dur={dur:F2}s" +
-                $" | dV  ({dv.x:+0.0000;-0.0000} {dv.y:+0.0000;-0.0000} {dv.z:+0.0000;-0.0000}) m/s" +
-                $" | a   ({accel.x:+0.0000;-0.0000} {accel.y:+0.0000;-0.0000} {accel.z:+0.0000;-0.0000}) m/s²");
-        }
-        else
-        {
-            Log($"{label,-32} | dur={dur:F2}s" +
-                $" | dW  ({dw.x:+0.0000;-0.0000} {dw.y:+0.0000;-0.0000} {dw.z:+0.0000;-0.0000}) rad/s" +
-                $" | α   ({alpha.x:+0.0000;-0.0000} {alpha.y:+0.0000;-0.0000} {alpha.z:+0.0000;-0.0000}) rad/s²");
-        }
+        // Rigidbody.linearVelocity/angularVelocity are world-frame, but commands
+        // are body-frame — rotating by the inverse of the attitude captured at
+        // ResetAndSettle (_homeRot, which every test case resets rb.rotation to)
+        // reports deltas in the same body frame the command was issued in. Without
+        // this, results are only clean if the capsule happens to start level;
+        // a tilted start attitude bleeds a "pure" body-axis command's effect across
+        // all three world axes and reads as spurious coupling.
+        Quaternion toBody = Quaternion.Inverse(_homeRot);
+        Vector3    dv     = toBody * (rb.linearVelocity  - v0);
+        Vector3    dw     = toBody * (rb.angularVelocity - w0);
+        Vector3    accel  = dv / dur;
+        Vector3    alpha  = dw / dur;
+
+        string line = $"{label,-32} | dur={dur:F2}s";
+        if (hasForce)
+            line += $" | dV  ({dv.x:+0.0000;-0.0000} {dv.y:+0.0000;-0.0000} {dv.z:+0.0000;-0.0000}) m/s" +
+                    $" | a   ({accel.x:+0.0000;-0.0000} {accel.y:+0.0000;-0.0000} {accel.z:+0.0000;-0.0000}) m/s²";
+        if (hasTorque)
+            line += $" | dW  ({dw.x:+0.0000;-0.0000} {dw.y:+0.0000;-0.0000} {dw.z:+0.0000;-0.0000}) rad/s" +
+                    $" | α   ({alpha.x:+0.0000;-0.0000} {alpha.y:+0.0000;-0.0000} {alpha.z:+0.0000;-0.0000}) rad/s²";
+        line += $" | fired=[{MaskToList(firedMask)}]";
+        Log(line);
 
         // Coast window: hold position so you can observe the post-burn motion
         // before the next reset. Velocity was already captured above.
         yield return new WaitForSeconds(observeTime);
+    }
+
+    static string MaskToList(int mask)
+    {
+        if (mask == 0) return "none";
+        var names = new System.Collections.Generic.List<string>();
+        for (int i = 0; i < 16; i++)
+            if ((mask & (1 << i)) != 0)
+                names.Add($"T{i:D2}");
+        return string.Join(",", names);
     }
 }

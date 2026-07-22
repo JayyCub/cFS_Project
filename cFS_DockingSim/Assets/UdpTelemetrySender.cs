@@ -7,13 +7,14 @@ using UnityEngine;
 /// <summary>
 /// Sends relative navigation telemetry to cFS over UDP at a fixed rate.
 ///
-/// Packet layout (72 bytes, all little-endian):
+/// Packet layout (80 bytes, all little-endian):
 ///   [0]  float  MET_s               mission elapsed time
 ///   [4]  float  Range_m
 ///   [8]  float  ClosingSpeed_ms
 ///   [12] float  LateralOffset_m
 ///   [16] float  AttitudeError_deg
-///   [20] float  Pos_X
+///   [20] float  Pos_X               chaser transform origin, world frame — CW
+///                                    feedforward input; NOT docking-port-relative
 ///   [24] float  Pos_Y
 ///   [28] float  Pos_Z
 ///   [32] float  Vel_X
@@ -26,6 +27,10 @@ using UnityEngine;
 ///   [60] float  PitchError_deg      per-axis attitude error [-180, 180]
 ///   [64] float  YawError_deg
 ///   [68] float  RollError_deg
+///   [72] float  LatOffset_X         docking-port-relative lateral offset, signed,
+///                                    in the target port's local right/up frame —
+///                                    what GNC's lateral controller actually steers on
+///   [76] float  LatOffset_Y
 ///
 /// On the cFS side, declare a matching packed struct and read with CFE_SB or raw UDP.
 /// </summary>
@@ -132,7 +137,7 @@ public class UdpTelemetrySender : MonoBehaviour
         bool docked     = detector != null && detector.isDocked;
         int  flags      = (inCorridor ? 1 : 0) | (docked ? 2 : 0);
 
-        byte[] buf = new byte[72];
+        byte[] buf = new byte[80];
         int    off = 0;
 
         void WriteFloat(float v) { Buffer.BlockCopy(BitConverter.GetBytes(v), 0, buf, off, 4); off += 4; }
@@ -156,6 +161,8 @@ public class UdpTelemetrySender : MonoBehaviour
         WriteFloat(nav.pitchError);
         WriteFloat(nav.yawError);
         WriteFloat(nav.rollError);
+        WriteFloat(nav.lateralOffsetX);
+        WriteFloat(nav.lateralOffsetY);
 
         return buf;
     }

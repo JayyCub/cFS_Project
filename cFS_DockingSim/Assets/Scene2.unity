@@ -14796,7 +14796,7 @@ AudioListener:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 400522911}
-  m_Enabled: 1
+  m_Enabled: 0
 --- !u!20 &400522914
 Camera:
   m_ObjectHideFlags: 0
@@ -14806,8 +14806,8 @@ Camera:
   m_GameObject: {fileID: 400522911}
   m_Enabled: 0
   serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_ClearFlags: 2
+  m_BackGroundColor: {r: 0, g: 0, b: 0, a: 0}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
   m_FOVAxisMode: 0
@@ -39599,7 +39599,7 @@ AudioListener:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 955778467}
-  m_Enabled: 1
+  m_Enabled: 0
 --- !u!20 &955778470
 Camera:
   m_ObjectHideFlags: 0
@@ -39609,8 +39609,8 @@ Camera:
   m_GameObject: {fileID: 955778467}
   m_Enabled: 0
   serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_ClearFlags: 2
+  m_BackGroundColor: {r: 0, g: 0, b: 0, a: 0}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
   m_FOVAxisMode: 0
@@ -49722,7 +49722,7 @@ Rigidbody:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1569440113}
   serializedVersion: 5
-  m_Mass: 4500
+  m_Mass: 12000
   m_LinearDamping: 0
   m_AngularDamping: 0
   m_CenterOfMass: {x: 0, y: 0, z: 0}
@@ -49770,8 +49770,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1569440113}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.12514961, y: -0.09052547, z: 0.19095013, w: 0.9693713}
-  m_LocalPosition: {x: 4.28, y: 0.8, z: -34.09}
+  m_LocalRotation: {x: -0.0767226, y: -0.098884255, z: -0.12865686, w: 0.98375964}
+  m_LocalPosition: {x: 3.4013226, y: 2.155516, z: -25.791437}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -49795,7 +49795,7 @@ Transform:
   - {fileID: 688609617}
   - {fileID: 1758605400}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 16.093, y: -7.638, z: 21.206}
+  m_LocalEulerAnglesHint: {x: -10.16, y: -10.23, z: -13.99}
 --- !u!114 &1569440121
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -59663,7 +59663,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: 07cb0297fd5502e4aba9ea630f864e33, type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -79071,6 +79071,7 @@ GameObject:
   - component: {fileID: 2028270419}
   - component: {fileID: 2028270420}
   - component: {fileID: 2028270421}
+  - component: {fileID: 2028270422}
   m_Layer: 0
   m_Name: SimulationManager
   m_TagString: Untagged
@@ -79078,6 +79079,26 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &2028270422
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2028270409}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ea703c307c3143f695ce1b35e6734dfa, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::DockingUIManager
+  nav: {fileID: 2028270415}
+  detector: {fileID: 2028270414}
+  rateDamping: {fileID: 1569440121}
+  corridor: {fileID: 2028270417}
+  chaser: {fileID: 1569440115}
+  cfsReceiver: {fileID: 725698973}
+  rcsModel: {fileID: 1569440114}
+  refreshInterval: 0.1
 --- !u!114 &2028270410
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -79141,6 +79162,7 @@ MonoBehaviour:
   corridor: {fileID: 2028270417}
   chaser: {fileID: 1569440115}
   cfsReceiver: {fileID: 725698973}
+  showControlsLegend: 0
   hudRefreshInterval: 0.1
 --- !u!114 &2028270414
 MonoBehaviour:
@@ -79278,8 +79300,8 @@ MonoBehaviour:
   rb: {fileID: 1569440116}
   shortBurn: 0.25
   longBurn: 1
-  settleTime: 2
-  observeTime: 2
+  settleTime: 1
+  observeTime: 1
   momentArm: 1.5
   runKey: 289
 --- !u!1001 &2100015019
@@ -79336,7 +79358,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: 87ea6d380c137e947be4fa25a3e8a516, type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects:

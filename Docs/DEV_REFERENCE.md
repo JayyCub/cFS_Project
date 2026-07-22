@@ -291,7 +291,7 @@ Full 6-DOF state (position, velocity, angular velocity) is also in the packet. c
 
 ## Key Coupling Constraints
 
-These values must be consistent across both codebases. A mismatch causes silent physics errors that are hard to debug:
+These values must be consistent across both codebases. A mismatch causes silent physics errors that are hard to debug — this table is the single place both sides' code comments point to instead of pointing at each other (see `gnc_param_tbl.c`, `gnc_app_tbl.h`, and `RCSModel.cs`).
 
 | Value | cFS location | Unity location |
 |-------|-------------|----------------|
@@ -299,9 +299,12 @@ These values must be consistent across both codebases. A mismatch causes silent 
 | Vehicle mass 4500 kg | `ParamTbl.VehicleMass` | Rigidbody mass (Inspector) |
 | Moment arm 1.5 m | `GNC_RCS_MOMENT_ARM` in `gnc_app.h` | `RCSModel` thruster position vectors |
 | Mean motion 0.00113 rad/s | `GNC_CW_MEAN_MOTION` in `gnc_app.h` | `ClohessyWiltshire.meanMotion` |
+| Approach corridor half-angle 15° | `ParamTbl.ConeHalfAngle_deg` | `ApproachCorridor.coneHalfAngle` |
 | Brake threshold | `BrakeAccel_Hard_mss` / `BrakeAccel_Light_mss` × `VehicleMass` | `RCSModel.SoftBrakeThreshold_N` (938 N) |
 | Telemetry packet layout | `GNC_APP_UnityTlm_t` struct in `gnc_app.h` | `UdpTelemetrySender.BuildPacket()` |
 | Command packet layout | `GNC_APP_SendCommand()` in `gnc_app_udp.c` | `UdpCommandReceiver.Update()` |
+
+When changing any value on this list, update both locations in the same commit — there is no runtime sync between the two codebases (they're separate processes talking over UDP), so a mismatch fails silently as systematically wrong burn durations or corridor geometry rather than a compile/load error.
 
 ---
 

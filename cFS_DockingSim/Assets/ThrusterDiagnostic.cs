@@ -11,6 +11,11 @@ using UnityEngine;
 /// logged alongside the primary axis so you can see exactly how much backward
 /// drift each command causes.
 ///
+/// After the group cases, an individual-thruster sweep fires each thruster
+/// alone (binary full power via SetThrusterCommand, bypassing the allocator)
+/// to record its true force+torque signature and flag any thruster that's
+/// dead, weak, or fires alongside thrusters it shouldn't.
+///
 /// Setup:
 ///   1. Add this component to any active GameObject in the scene.
 ///   2. Drag the RCSModel into the "rcs" slot.  The Rigidbody is auto-found
@@ -46,6 +51,11 @@ public class ThrusterDiagnostic : MonoBehaviour
 
     [Header("Torque moment arm — must match GNC_RCS_MOMENT_ARM (m)")]
     public float momentArm = 1.5f;
+
+    [Header("Individual thruster sweep")]
+    [Tooltip("After the group cases, fire each active thruster alone (binary, full power) " +
+             "at both burn durations to catch dead/weak/misfiring units.")]
+    public bool includeIndividualThrusters = true;
 
     [Header("Key to start the sequence")]
     public KeyCode runKey = KeyCode.F8;
@@ -165,7 +175,12 @@ public class ThrusterDiagnostic : MonoBehaviour
             ("3-axis attitude combo  ", Vector3.zero,                    new Vector3( F * arm,  F * arm,  F * arm)),
         };
 
-        _total = cases.Length * 2;
+        var activeThrusterIndices = new System.Collections.Generic.List<int>();
+        for (int i = 0; i < rcs.ThrusterCount; i++)
+            if (rcs.IsThrusterActive(i)) activeThrusterIndices.Add(i);
+
+        _total = cases.Length * 2 +
+                 (includeIndividualThrusters ? activeThrusterIndices.Count * 2 : 0);
         _idx   = 0;
 
         Log("════ THRUSTER DIAGNOSTIC START ════");
@@ -185,6 +200,23 @@ public class ThrusterDiagnostic : MonoBehaviour
                 _status = c.label.TrimEnd();
                 yield return ResetAndSettle();
                 yield return FireAndMeasure(c.label, c.force, c.torque, dur);
+            }
+        }
+
+        if (includeIndividualThrusters)
+        {
+            Log("──── INDIVIDUAL THRUSTER SWEEP ────");
+            Log($"Firing {activeThrusterIndices.Count} active thruster(s) alone (binary, full power) — " +
+                "watch for near-zero dV/dW (dead/weak) or fired=[] not matching the commanded T##.");
+            foreach (int i in activeThrusterIndices)
+            {
+                foreach (float dur in new[] { shortBurn, longBurn })
+                {
+                    _idx++;
+                    _status = $"T{i:D2} solo";
+                    yield return ResetAndSettle();
+                    yield return FireThrusterAndMeasure(i, dur);
+                }
             }
         }
 
@@ -277,6 +309,49 @@ public class ThrusterDiagnostic : MonoBehaviour
 
         // Coast window: hold position so you can observe the post-burn motion
         // before the next reset. Velocity was already captured above.
+        yield return new WaitForSeconds(observeTime);
+    }
+
+    // Fires exactly one thruster at full binary power via SetThrusterCommand, bypassing
+    // the allocator entirely. Unlike the group cases (which command a force/torque and
+    // let the pseudo-inverse pick thrusters), this isolates thruster i's true, unmixed
+    // force+torque signature — canted thrusters always couple both, so dW is expected
+    // to be non-zero even for "translation" thrusters. Also flags dead/weak thrusters
+    // (near-zero dV/dW) and cross-firing (fired mask ≠ the single commanded bit).
+    IEnumerator FireThrusterAndMeasure(int index, float dur)
+    {
+        Vector3 v0 = rb.linearVelocity;
+        Vector3 w0 = rb.angularVelocity;
+
+        rcs.SetThrusterCommand(1 << index, dur);
+
+        int   firedMask = 0;
+        float elapsed   = 0f;
+        float window    = dur + 0.05f;
+        while (elapsed < window)
+        {
+            firedMask |= rcs.CurrentThrusterMask;
+            yield return new WaitForFixedUpdate();
+            elapsed += Time.fixedDeltaTime;
+        }
+
+        Quaternion toBody = Quaternion.Inverse(_homeRot);
+        Vector3    dv     = toBody * (rb.linearVelocity  - v0);
+        Vector3    dw     = toBody * (rb.angularVelocity - w0);
+        Vector3    accel  = dv / dur;
+        Vector3    alpha  = dw / dur;
+
+        string label = $"T{index:D2} solo";
+        string line = $"{label,-32} | dur={dur:F2}s" +
+            $" | dV  ({dv.x:+0.0000;-0.0000} {dv.y:+0.0000;-0.0000} {dv.z:+0.0000;-0.0000}) m/s" +
+            $" | a   ({accel.x:+0.0000;-0.0000} {accel.y:+0.0000;-0.0000} {accel.z:+0.0000;-0.0000}) m/s²" +
+            $" | dW  ({dw.x:+0.0000;-0.0000} {dw.y:+0.0000;-0.0000} {dw.z:+0.0000;-0.0000}) rad/s" +
+            $" | α   ({alpha.x:+0.0000;-0.0000} {alpha.y:+0.0000;-0.0000} {alpha.z:+0.0000;-0.0000}) rad/s²";
+        line += $" | fired=[{MaskToList(firedMask)}]";
+        if (firedMask != (1 << index))
+            line += "  *** UNEXPECTED FIRED MASK ***";
+        Log(line);
+
         yield return new WaitForSeconds(observeTime);
     }
 

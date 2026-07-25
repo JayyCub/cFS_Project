@@ -473,6 +473,8 @@ public class RCSModel : MonoBehaviour
             ( new Vector3( 0f, -1.5f,  0f), new Vector3( 1, -1,  0).normalized ),  // T15
         };
 
+        var gasPuffMat = CreateGasPuffMaterial();
+
         var transforms = new Transform[thrusterData.Length];
         for (int i = 0; i < thrusterData.Length; i++)
         {
@@ -486,7 +488,7 @@ public class RCSModel : MonoBehaviour
             var plumeGo = new GameObject("Plume");
             plumeGo.transform.SetParent(go.transform, false);
             plumeGo.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            ConfigureThrusterPlume(plumeGo.AddComponent<ParticleSystem>());
+            ConfigureThrusterPlume(plumeGo.AddComponent<ParticleSystem>(), gasPuffMat);
         }
 
         thrusterTransforms = transforms;
@@ -497,59 +499,87 @@ public class RCSModel : MonoBehaviour
                   "Each thruster has a Plume child ParticleSystem — add ThrusterPlumes to this GameObject to drive them.");
     }
 
-    static void ConfigureThrusterPlume(ParticleSystem ps)
+    // Shared soft-alpha material for all plume puffs — see GasPuff.shader.
+    // Must be a real saved asset (not HideAndDontSave): this runs at edit time and the
+    // resulting material gets assigned into the scene's ParticleSystemRenderer, so it has
+    // to survive serialization — an unsaved object reference goes stale on reload and
+    // Unity shows the pink "missing material" placeholder instead.
+    const string GasPuffMatPath = "Assets/GasPuff.mat";
+
+    static Material CreateGasPuffMaterial()
+    {
+        var existing = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>(GasPuffMatPath);
+        if (existing != null)
+            return existing;
+
+        var shader = Shader.Find("Custom/GasPuff");
+        if (shader == null)
+        {
+            Debug.LogWarning("[RCSModel] Custom/GasPuff shader not found — falling back to Default-Particle material. " +
+                              "Ensure GasPuff.shader is in the Assets folder.");
+            return UnityEditor.AssetDatabase.GetBuiltinExtraResource<Material>("Default-Particle.mat");
+        }
+
+        var mat = new Material(shader);
+        UnityEditor.AssetDatabase.CreateAsset(mat, GasPuffMatPath);
+        UnityEditor.AssetDatabase.SaveAssets();
+        return mat;
+    }
+
+    static void ConfigureThrusterPlume(ParticleSystem ps, Material gasPuffMat)
     {
         var main = ps.main;
-        // Short lifetime + high speed = particles stay close to nozzle and form a tight beam.
-        // Cone length ≈ speed × lifetime: 40 m/s × 0.12s ≈ 5m reach.
-        main.startLifetime   = new ParticleSystem.MinMaxCurve(0.8f, 1.4f);
-        main.startSpeed      = new ParticleSystem.MinMaxCurve(160f, 160f);
-        main.startSize       = new ParticleSystem.MinMaxCurve(0.32f, 0.64f); // controls streak WIDTH
+        // No atmosphere out here: no drag, no turbulence (see noise module below) — puffs
+        // keep roughly their launch velocity all the way out, they just expand as they go.
+        main.startLifetime   = new ParticleSystem.MinMaxCurve(2.0f, 2.5f);
+        main.startSpeed      = new ParticleSystem.MinMaxCurve(200f, 250f);
+        main.startSize       = new ParticleSystem.MinMaxCurve(2.5f, 3f); // puff diameter at birth
+        main.startRotation   = new ParticleSystem.MinMaxCurve(0f, 360f * Mathf.Deg2Rad); // vary billboard spin so puffs don't look identical
         main.startColor      = new ParticleSystem.MinMaxGradient(
-            new Color(0.9f, 0.96f, 1f, 1f),
-            new Color(1f,   1f,   1f, 0.85f));
+            new Color(0.92f, 0.95f, 1f, 0.55f),
+            new Color(1f,    1f,    1f, 0.4f));
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.simulationSpeed = 5f;
-        main.maxParticles    = 1000;
+        main.simulationSpeed = 1f;
+        main.maxParticles    = 1500;
         main.loop            = true;
 
         var emission = ps.emission;
         emission.rateOverTime = 0f;
 
-        // Very tight cone so streaks form a coherent beam, not a wide spray.
+        // Wider cone than the old beam — gas expands as it leaves the nozzle.
         var shape = ps.shape;
         shape.enabled   = true;
         shape.shapeType = ParticleSystemShapeType.Cone;
-        shape.angle     = 4f;
-        shape.radius    = 0.01f;
+        shape.angle     = 12f;
+        shape.radius    = 0.05f;
         shape.rotation  = new Vector3(-90f, 0f, 0f);
 
-        // Fade out in the back half — bright near nozzle, invisible at the tip.
+        // Fade in quickly, dwell, then dissolve — reads as gas dispersing rather than a hard cutoff.
         var col = ps.colorOverLifetime;
         col.enabled = true;
         var gradient = new Gradient();
         gradient.SetKeys(
-            new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(new Color(0.8f, 0.92f, 1f), 1f) },
-            new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 0.4f), new GradientAlphaKey(0f, 1f) }
+            new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(new Color(0.85f, 0.9f, 0.95f), 1f) },
+            new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(1f, 0.15f), new GradientAlphaKey(0f, 1f) }
         );
         col.color = new ParticleSystem.MinMaxGradient(gradient);
 
-        // No size growth — streaks should stay narrow like rays, not expand into puffs.
+        // Puffs grow as they drift — the core "gas cloud expanding" look.
         var size = ps.sizeOverLifetime;
-        size.enabled = false;
+        size.enabled = true;
+        size.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.6f, 1f, 2.2f));
 
-        // No noise — straight rays look like high-pressure gas, turbulence looks like smoke.
+        // No drag, no noise/turbulence — this is vacuum. Free expansion only (size curve above).
+        var limit = ps.limitVelocityOverLifetime;
+        limit.enabled = false;
+
         var noise = ps.noise;
         noise.enabled = false;
 
-        // Stretched Billboard: each particle becomes a streak aligned with its velocity.
-        // velocityScale stretches it proportional to speed — faster = longer streak.
-        // Result: ~80 streaks/sec forming a solid-looking beam, far cheaper than thousands of spheres.
+        // Billboard puffs using the procedural soft-round GasPuff shader (no texture asset needed).
         var r = ps.GetComponent<ParticleSystemRenderer>();
-        r.renderMode     = ParticleSystemRenderMode.Stretch;
-        r.velocityScale  = 0.06f;
-        r.lengthScale    = 5.0f;
-        r.sharedMaterial = UnityEditor.AssetDatabase.GetBuiltinExtraResource<Material>("Default-Particle.mat");
+        r.renderMode     = ParticleSystemRenderMode.Billboard;
+        r.sharedMaterial = gasPuffMat;
 
         ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
     }
@@ -558,6 +588,7 @@ public class RCSModel : MonoBehaviour
     void AddPlumesToExistingThrusters()
     {
         int count = 0;
+        var gasPuffMat = CreateGasPuffMaterial();
 
         foreach (Transform child in transform)
         {
@@ -571,7 +602,7 @@ public class RCSModel : MonoBehaviour
             var plumeGo = new GameObject("Plume");
             plumeGo.transform.SetParent(child, false);
             plumeGo.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            ConfigureThrusterPlume(plumeGo.AddComponent<ParticleSystem>());
+            ConfigureThrusterPlume(plumeGo.AddComponent<ParticleSystem>(), gasPuffMat);
             count++;
         }
 

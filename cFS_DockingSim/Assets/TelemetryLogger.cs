@@ -46,6 +46,7 @@ public class TelemetryLogger : MonoBehaviour
             "Pos_X,Pos_Y,Pos_Z," +
             "Vel_X,Vel_Y,Vel_Z," +
             "AngVel_X,AngVel_Y,AngVel_Z," +
+            "LatOffset_X,LatOffset_Y," +
             "InCorridor,Docked"
         );
         writer.Flush();
@@ -73,6 +74,7 @@ public class TelemetryLogger : MonoBehaviour
             $"{pos.x:F4},{pos.y:F4},{pos.z:F4}," +
             $"{vel.x:F4},{vel.y:F4},{vel.z:F4}," +
             $"{angVel.x:F6},{angVel.y:F6},{angVel.z:F6}," +
+            $"{nav.lateralOffsetX:F4},{nav.lateralOffsetY:F4}," +
             $"{(inCorridor ? 1 : 0)},{(docked ? 1 : 0)}"
         );
         // No per-write Flush() here — StreamWriter buffers internally, and an explicit

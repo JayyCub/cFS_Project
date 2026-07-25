@@ -35,6 +35,10 @@ cFS_DockingSim/.vs/
 
 # Telemetry log output
 cFS_DockingSim/TelemetryLog_*.csv
+cFS_DockingSim/ThrusterDiagnostic_*.log
+
+# Unity autosave/crash-recovery scene snapshots
+cFS_DockingSim/Assets/_Recovery/
 
 # cFS console run logs (run-sim.sh)
 run_logs/

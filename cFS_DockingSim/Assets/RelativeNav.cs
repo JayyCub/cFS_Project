@@ -60,6 +60,15 @@ public class RelativeNav : MonoBehaviour
     public float yawError   { get; private set; }
     public float rollError  { get; private set; }
 
+    [Header("Calibration")]
+    [Tooltip("Constant bias subtracted from the raw roll reading (degrees). Confirmed via a spawn-pose " +
+             "test: the ship starts already correctly seated and rollError still reads a steady ~90° " +
+             "without ever touching roll input — so targetPort's authored 'up' axis doesn't match the " +
+             "convention chaserPort/the petal indexing actually uses. This corrects for that fixed rig " +
+             "offset. If it ever needs re-tuning, do it the same way: sit at a known-good spawn/dock " +
+             "pose with zero roll input and adjust until rollError reads ~0°.")]
+    public float rollErrorOffset = 90f;
+
     void FixedUpdate()
     {
         if (chaserPort == null || targetPort == null) return;
@@ -93,6 +102,8 @@ public class RelativeNav : MonoBehaviour
         Vector3    euler     = errQuat.eulerAngles;
         pitchError = euler.x > 180f ? euler.x - 360f : euler.x;
         yawError   = euler.y > 180f ? euler.y - 360f : euler.y;
-        rollError  = euler.z > 180f ? euler.z - 360f : euler.z;
+
+        float rawRoll = euler.z > 180f ? euler.z - 360f : euler.z;
+        rollError = Mathf.DeltaAngle(0f, rawRoll - rollErrorOffset);
     }
 }

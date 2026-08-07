@@ -26,6 +26,14 @@ public class VehicleState : MonoBehaviour
              "The mesh value is logged at startup so you can read and refine it.")]
     public Vector3 centerOfMassOverride = Vector3.zero;
 
+    [Header("Contact Stability")]
+    [Tooltip("Caps how fast PhysX may push this body apart from an interpenetrating collider in a " +
+             "single step. Unity's default is effectively unbounded, which is the classic cause of a " +
+             "body 'exploding' away on deep or awkward mesh contact (e.g. a slightly-misaligned docking " +
+             "attempt) — capping it converts that into a slow, bounded separation instead. Only applies " +
+             "while colliders are actually overlapping; has no effect on normal flight.")]
+    public float maxDepenetrationVelocity = 0.5f;
+
     private Rigidbody rb;
 
     // Read-only accessors
@@ -44,6 +52,8 @@ public class VehicleState : MonoBehaviour
             Debug.LogError($"[VehicleState] {gameObject.name} needs a Rigidbody", this);
             return;
         }
+
+        rb.maxDepenetrationVelocity = maxDepenetrationVelocity;
 
         // Apply CoM override first (RCSModel.DelayedInit reads this via rb.centerOfMass).
         Debug.Log($"[VehicleState] {gameObject.name} mesh CoM (local) = {rb.centerOfMass:F3}");

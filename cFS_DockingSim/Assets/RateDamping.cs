@@ -38,6 +38,9 @@ public class RateDamping : MonoBehaviour
 
     public bool isActive { get; private set; } = false;
 
+    /// <summary>Programmatic override for the H-key toggle (e.g. SoftCaptureController suppressing RDM on capture).</summary>
+    public void SetActive(bool active) => isActive = active;
+
     private Rigidbody rb;
 
     void Start()

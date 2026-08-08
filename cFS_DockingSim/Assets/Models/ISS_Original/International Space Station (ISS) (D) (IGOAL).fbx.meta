@@ -5,555 +5,775 @@ ModelImporter:
   internalIDToNameTable: []
   externalObjects:
   - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: AMS
+    second: {fileID: 2100000, guid: 3c0890d8cc1782b4f922ba5f955c7f9c, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Airlock
+    second: {fileID: 2100000, guid: 2b6b104dfc64b8f4f8dd3c95af515f0a, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ArgUS_2-1
+    second: {fileID: 2100000, guid: fcf82a67aa2893c48b572548d4b7a030, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: BEAM
+    second: {fileID: 2100000, guid: 34f8b7d68b3d33644bca33cdd07720c5, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: BishopMaterial
+    second: {fileID: 2100000, guid: b8c15e321f27de3499dcc51f3bee8e37, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: CLARREO
+    second: {fileID: 2100000, guid: 716b7e331ce3a834699af5d28e0ebfba, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Codex
+    second: {fileID: 2100000, guid: fb83de226a3f66e4db26aab5e6c4d3ee, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ColKa
+    second: {fileID: 2100000, guid: a18ccd40a7a2ce942a41c176eff5079f, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Columbus
+    second: {fileID: 2100000, guid: 16ebc7efb6ca40945a6c288ad6f2650e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Columbus.Payloads_01
+    second: {fileID: 2100000, guid: cf316d8e90d684f45bf731a959ab9876, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ELC3_Payloads
+    second: {fileID: 2100000, guid: ea8f7db1e041e9c4d936de56d454d1f0, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ELC_Base
+    second: {fileID: 2100000, guid: 9f1669f02a314b14c9444102e8c92620, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ELC_Payloads_01
+    second: {fileID: 2100000, guid: 370769099fea56148aed9a4841b7336b, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ELC_Payloads_02
+    second: {fileID: 2100000, guid: d59a3357d3bf97c4d913bdca9e22db31, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ELC_Payloads_03
+    second: {fileID: 2100000, guid: 0cd12a82833f0cb42aaf72b11b41d14d, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ELC_Payloads_04
+    second: {fileID: 2100000, guid: e1f57bcb1b8cd3c4aa8b357a956f5bcf, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: EMIT
+    second: {fileID: 2100000, guid: c9fd25dca43af7e44a8052895928f22b, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: IROSA
+    second: {fileID: 2100000, guid: 4502835526c397c44bc78d0355e2e7c1, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: ISS_iSEEP2
+    second: {fileID: 2100000, guid: 3e12ae6e4f05f984f9204845ba10fd8a, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_EF.Payload
+    second: {fileID: 2100000, guid: 5f2a5bf74d3c44140ac5f6323ff2fe72, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_EF.Payload02
+    second: {fileID: 2100000, guid: 1c8c0d3e7ce25814ca167e67f2e86605, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_EF_Diffuse
+    second: {fileID: 2100000, guid: cb44a72cc2fdfd247b81e5e43d426f91, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_EF_GEDI
+    second: {fileID: 2100000, guid: e8cc9552eda418744bae4519dc33f7c8, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_EF_Payload03
+    second: {fileID: 2100000, guid: ef5bc756f66cb604ca12e87c1d2c8228, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_PM
+    second: {fileID: 2100000, guid: d5f27d77987cb344ca34285e6b07c5bc, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: JEM_PS
+    second: {fileID: 2100000, guid: bb44411f672346543a6ec1ecb023c44e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Lettering_1
+    second: {fileID: 2100000, guid: 2e5ab8b36a21b31409ea1e6bb146fcc5, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MLI.Generic
+    second: {fileID: 2100000, guid: 69695ec5f91e1db4ca988238a40c96e4, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MLM
+    second: {fileID: 2100000, guid: 750829ef8b7ea5c4491407ce398b713d, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Node 1
+    second: {fileID: 2100000, guid: b40445a669d2da442851db5d092f8ae6, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Node 2_3
+    second: {fileID: 2100000, guid: 6bcc9a49af842b34fa5508536092eef0, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Node.Cupola
+    second: {fileID: 2100000, guid: 5b083b385cf93e047b1a9260c2d4632e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Node.MRM1
+    second: {fileID: 2100000, guid: 692aaa57dca694349a86fa5c67859c00, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Node.MRM2
+    second: {fileID: 2100000, guid: 4b947d0f3c8d1c7448d8b46055f0ec7c, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PMA
+    second: {fileID: 2100000, guid: 3889afbb5d97d654085376d79d690d93, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: PMM
+    second: {fileID: 2100000, guid: 13f7ac823b007944a975aa5c29c00fe9, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Russian Docking Module
+    second: {fileID: 2100000, guid: e9a92859bb4fcf146af52489dc010fd6, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: STP-H11
+    second: {fileID: 2100000, guid: dbdbd56e24ed11349bf80ff8a4b981f3, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: STP-H8
+    second: {fileID: 2100000, guid: 6187ef39e382bac46a09cf1af879b3ae, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: STP-H9
+    second: {fileID: 2100000, guid: efc193da32d8eba478d70c4e6a9d5567, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Truss
+    second: {fileID: 2100000, guid: 7744c2fd8491af744807dc28d83a87fe, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: USLab
+    second: {fileID: 2100000, guid: aaf4351e6cd0a714caf8b8d1671d1008, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Zarya
+    second: {fileID: 2100000, guid: 1ec1ba2c84bdd394081604db14b1d48a, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Zvezda.SM
+    second: {fileID: 2100000, guid: 6df0929d04f087848a635df84adb14fe, type: 2}
+  - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: AMS_Diffuse
-    second: {fileID: 2800000, guid: be2071cba2a8e3e45bb03bbb19f2e77f, type: 3}
+    second: {fileID: 2800000, guid: 8a801f011b3a913459dc7616d53f2144, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: AMS_Metallic
-    second: {fileID: 2800000, guid: 5bb9f770ce1c3d449a908b559358f8e1, type: 3}
+    second: {fileID: 2800000, guid: eab9c009abf50b747bdc717f2e11065e, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: AMS_Normal
-    second: {fileID: 2800000, guid: d61eabfb43321df43a1a8039a92af19e, type: 3}
+    second: {fileID: 2800000, guid: d9a81bac64261d941a240f6cb934ca26, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Airlock_Diffuse
-    second: {fileID: 2800000, guid: c2fe62b70e0aa194f95ba8cd0b8d76d1, type: 3}
+    second: {fileID: 2800000, guid: 98fdd61c3a1075f4c8487a9f8191ad5a, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Airlock_Metallic
-    second: {fileID: 2800000, guid: 21b3cfe170ae3ea40a9b074d32d8056a, type: 3}
+    second: {fileID: 2800000, guid: d43ca89aea90b1941a3715583a9c2e5a, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Airlock_Normal
-    second: {fileID: 2800000, guid: 4e3e25c8c1703ae46a9ce8176942b415, type: 3}
+    second: {fileID: 2800000, guid: bf194abd2d931b247b5a36cca210caeb, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ArgUS_M2_AlbedoTransparency
-    second: {fileID: 2800000, guid: 74d734f4ffe031e45804a0d5830fddd9, type: 3}
+    second: {fileID: 2800000, guid: 862548396bf08e04da959c48843bbc70, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ArgUS_M2_MetallicSmoothness
-    second: {fileID: 2800000, guid: 93b605bdf37d8df40b2c490350129a7a, type: 3}
+    second: {fileID: 2800000, guid: 2abb8f1143906a6439071de64d595d08, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ArgUS_M2_Normal
-    second: {fileID: 2800000, guid: 5688610e5aeeb6c46b0660de2405e226, type: 3}
+    second: {fileID: 2800000, guid: b5179a60e2db4254e973eb7b0e436a04, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: BEAM_Diffuse
-    second: {fileID: 2800000, guid: cdda9ae0fe8b2a744a4c432a4c257cad, type: 3}
+    second: {fileID: 2800000, guid: d277348b58ed43c41aacfe0a5638663a, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: BEAM_Metallic
-    second: {fileID: 2800000, guid: 5170533e8bb23bc44bc16dc1bc2bd076, type: 3}
+    second: {fileID: 2800000, guid: 35586abccebb7d34a808393a3e9524be, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: BEAM_Normal
-    second: {fileID: 2800000, guid: 24889d19280fac8498f8ebcef70c242a, type: 3}
+    second: {fileID: 2800000, guid: 54fc405cc72dd834ebf7da8ed4dd1d46, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Bishop_Diffuse
-    second: {fileID: 2800000, guid: d6297626551d9a748a101b20d94789a5, type: 3}
+    second: {fileID: 2800000, guid: 09b9254eef6486b41b9d0635f6030e5b, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Bishop_Metallic
-    second: {fileID: 2800000, guid: 835dc282c7826284baa51e1f1f6aba03, type: 3}
+    second: {fileID: 2800000, guid: 03317c887c268e149baaf91a1dd3e09d, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Bishop_Normal
-    second: {fileID: 2800000, guid: 75d513e05eb244140991ab02a468e078, type: 3}
+    second: {fileID: 2800000, guid: e7488ffcbb8f3c741aa7c6497772f77c, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: CLARREO_Diffuse
-    second: {fileID: 2800000, guid: b5d1335c5716e844892307ce34618f98, type: 3}
+    second: {fileID: 2800000, guid: bcdf40d292897d44b9fa21fb2bfa56eb, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: CLARREO_Metallic
-    second: {fileID: 2800000, guid: a804c65650e7c654799d091f6a02930d, type: 3}
+    second: {fileID: 2800000, guid: 5268c7db97930d74ba1653a00a872c86, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: CLARREO_Normal
-    second: {fileID: 2800000, guid: 44c195784fea3d542b0661a5bd687427, type: 3}
+    second: {fileID: 2800000, guid: 4fc8a51282230a34fa90d17ecf0a62d8, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: CoDEx_Diffuse
-    second: {fileID: 2800000, guid: 5921ed7e3ffff5b41b3cd7115808b2d1, type: 3}
+    second: {fileID: 2800000, guid: 7abc7bae8a26f7141a8cf7294f67dc3a, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: CoDEx_Metallic
-    second: {fileID: 2800000, guid: 4a2f563b6d2607845a8a76b65f5fb77c, type: 3}
+    second: {fileID: 2800000, guid: 3f6cc5d61690f0245915a0715c122e0e, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: CoDEx_Normal
-    second: {fileID: 2800000, guid: 4cf900d31702ec94a8cab05777767c74, type: 3}
+    second: {fileID: 2800000, guid: 6db1e019bd5f7b944a3fee231a69e72d, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ColKa_Diffuse
-    second: {fileID: 2800000, guid: 5f04a952ed406fc46b4a50042b452c50, type: 3}
+    second: {fileID: 2800000, guid: 2d7819a3d90a72041acfda311ac2552c, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ColKa_Metallic
-    second: {fileID: 2800000, guid: 12a0bbd7d6e5bb5409d4d8ad5d14bd18, type: 3}
+    second: {fileID: 2800000, guid: e1f2409aac3018242bfb06c29228acc6, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ColKa_Normal
-    second: {fileID: 2800000, guid: 81997074e241fa944bc5bac275a744d0, type: 3}
+    second: {fileID: 2800000, guid: 0f2b1449655a671428b733419cd3c9ef, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Columbus_Diff
-    second: {fileID: 2800000, guid: c1a87e3872112ea44a8d4dde7d1d7d54, type: 3}
+    second: {fileID: 2800000, guid: e067c6634b5739d4f8f57d8a9144eedc, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Columbus_Metallic
-    second: {fileID: 2800000, guid: 4b5f4cfde53d06c4fa530d556f4225e7, type: 3}
+    second: {fileID: 2800000, guid: 96b1945a6126fa1469dc4dca2e4ca525, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Columbus_Normal
-    second: {fileID: 2800000, guid: 825e22c8c3e3f7a45835eedbb162e414, type: 3}
+    second: {fileID: 2800000, guid: 22f692f9eddae1048b0927d84e1dede9, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Columbus_Payloads_01_Diffuse
-    second: {fileID: 2800000, guid: 59c9cb67eb801b542ae84c4111c489da, type: 3}
+    second: {fileID: 2800000, guid: 5a38028e897cc2948928b5216e6dc3f4, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Columbus_Payloads_01_Metallic
-    second: {fileID: 2800000, guid: e5c04bde8ce90a94aa6c96caa103d349, type: 3}
+    second: {fileID: 2800000, guid: 09047974975c0804db8819595c5970ff, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Columbus_Payloads_01_Normal
-    second: {fileID: 2800000, guid: e449098cd4c98f447a466e1857b63461, type: 3}
+    second: {fileID: 2800000, guid: 41623566ccaa64741aec37fbb31c3d12, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Cupola_Diffuse
-    second: {fileID: 2800000, guid: 465869a4844d9fe4fbf32641080922fd, type: 3}
+    second: {fileID: 2800000, guid: 48975540ce699fc479d54cc68cb29417, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Cupola_Metallic
-    second: {fileID: 2800000, guid: e3dca19877c2b584980c0b1228c64aee, type: 3}
+    second: {fileID: 2800000, guid: d3135757757951742a6881dd58967393, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Cupola_Normal
-    second: {fileID: 2800000, guid: ab19b77f6efe7784bb0721aeeb1781cd, type: 3}
+    second: {fileID: 2800000, guid: 2ca58a4d559590a4786734e4eb865934, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Base
-    second: {fileID: 2800000, guid: b6c38adbf5cfa394fa022bff53992c2b, type: 3}
+    second: {fileID: 2800000, guid: a755724a08c9fcd43b261e759f6f0daa, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Base_Metallic
-    second: {fileID: 2800000, guid: 2e23532154cd9de459c12185284c64ac, type: 3}
+    second: {fileID: 2800000, guid: da034a97086d9c342a607f6cbd12de6f, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Payloads_01_Diffuse
-    second: {fileID: 2800000, guid: b7afe4a1dfad70d468fdc66b58fdb7fc, type: 3}
+    second: {fileID: 2800000, guid: 2964c7757ddcec84d8791fb67258d0b1, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Payloads_01_Metallic
-    second: {fileID: 2800000, guid: 13f8f85a9faa45545803deb6c1ee8a3b, type: 3}
+    second: {fileID: 2800000, guid: b16ff569a6514354096d1f43a54aea0c, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Payloads_02_Diffuse
-    second: {fileID: 2800000, guid: 9fd44389da8e91f448c56673cd70d6be, type: 3}
+    second: {fileID: 2800000, guid: 096558ce12d2d5747b50395c3357c522, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Payloads_02_Metallic
-    second: {fileID: 2800000, guid: 0e78c246bfbd6774a80bd91fcdfebe20, type: 3}
+    second: {fileID: 2800000, guid: bd05c3a6cdf71cc4e83724fed328e8fe, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Payloads_03_Diffuse
-    second: {fileID: 2800000, guid: 05274da367016d24c9053373009968f5, type: 3}
+    second: {fileID: 2800000, guid: ed656d03902de874fb98c68f456101ab, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Payloads_03_Metallic
-    second: {fileID: 2800000, guid: e172a2fcba44ea14c858ec275a7b2abe, type: 3}
+    second: {fileID: 2800000, guid: f42e8dd651d759343844decd3505cfd4, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Payloads_04_Diffuse
-    second: {fileID: 2800000, guid: 5debfd385f9de4347bd4a1d7233b36a0, type: 3}
+    second: {fileID: 2800000, guid: 50e40efa8f5e87b4cb5511c087f2565d, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Payloads_04_Metallic
-    second: {fileID: 2800000, guid: 8b52c531e37a7ae4ea17691fa0c5701c, type: 3}
+    second: {fileID: 2800000, guid: f243b7a9614c7a8409fb4d947042fff6, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ELC_Payloads_04_Normal
-    second: {fileID: 2800000, guid: 96503d8e14324f6449a55d13160b6dab, type: 3}
+    second: {fileID: 2800000, guid: 1a32a06102e4c994ca4b6f5c95d397a3, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: EMIT_Diffuse
-    second: {fileID: 2800000, guid: 17343ed996090aa4f89694318122abb5, type: 3}
+    second: {fileID: 2800000, guid: c69f7e781be21c642bd3b3783069f4d4, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: EMIT_Metallic
-    second: {fileID: 2800000, guid: f007d5a7bef009e4fbac521c5adc4112, type: 3}
+    second: {fileID: 2800000, guid: 227e021ce63ded44ca1472e2fb36b862, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: EMIT_Normal
-    second: {fileID: 2800000, guid: aa8815bd8c3db1c41a95850c1f643c05, type: 3}
+    second: {fileID: 2800000, guid: 5127b2c7a2b4a744c8fdbf519ed18ebe, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: IROSA_Diffuse
-    second: {fileID: 2800000, guid: 6cf0939e7aa39c347a8a08854ec6befc, type: 3}
+    second: {fileID: 2800000, guid: 5f195675cbc133343b3b595a484c2230, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: IROSA_Metallic
-    second: {fileID: 2800000, guid: 11b8514e42b37154bb4607ded2c0582b, type: 3}
+    second: {fileID: 2800000, guid: 6d6fb35c42b80454ab5e8cf38535b24e, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: IROSA_Normal
-    second: {fileID: 2800000, guid: 20b49b35f74429342a9f96a0e957e5ec, type: 3}
+    second: {fileID: 2800000, guid: fd755a6d26d1af647a6018ae2457c592, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ISS_i-SEEP2_Diffuse
-    second: {fileID: 2800000, guid: 3bb8fcbfd4fec6f49bbb43d320a8967a, type: 3}
+    second: {fileID: 2800000, guid: 4262d5c4e85223b4a95208aae79cea5b, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ISS_i-SEEP2_Metallic
-    second: {fileID: 2800000, guid: 6d9cdc2023a35fd47bd6ef7c7f9d4980, type: 3}
+    second: {fileID: 2800000, guid: b62df72f40364e545a41e3e2d498f516, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: ISS_i-SEEP2_Normal
-    second: {fileID: 2800000, guid: 34b070d73607333429f270e065ddb878, type: 3}
+    second: {fileID: 2800000, guid: 1e3cbc9e2d4f4c94fb29b3aa6c2875fd, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_EF_Diffuse
-    second: {fileID: 2800000, guid: d9e03ea4b984fae4895e6016ba02ca7b, type: 3}
+    second: {fileID: 2800000, guid: a56a339653efac4498014974c600455f, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_EF_Metallic
-    second: {fileID: 2800000, guid: 79237fd2bb0370e498c40961c73ae13f, type: 3}
+    second: {fileID: 2800000, guid: 950315521c71108448646a32f150d758, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_EF_Normal
-    second: {fileID: 2800000, guid: a9291eca67e506d42b1f4c6bfc39c8b2, type: 3}
+    second: {fileID: 2800000, guid: 72de796fdb1b1ac478c27ca8572b748e, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_EF_Payload3_Diffuse
-    second: {fileID: 2800000, guid: 2ffe01201d14fba4bb32cd72ca72afd8, type: 3}
+    second: {fileID: 2800000, guid: 2ac05449232ad9a4aba0b59e360c70d8, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_PM_Diffuse
-    second: {fileID: 2800000, guid: 09e88fde445be1c47bb6e8d93ca4762a, type: 3}
+    second: {fileID: 2800000, guid: 597547510b7664b4792fd71428c17e01, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_PM_Metallic
-    second: {fileID: 2800000, guid: bf15cdc4f54b1fe458796a49c64cc3f2, type: 3}
+    second: {fileID: 2800000, guid: 2c2fe38d3bf60704fb9628668d83e4a2, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_PM_Normal
-    second: {fileID: 2800000, guid: 5ee4493c9fa0d944f8b01bc82f09d983, type: 3}
+    second: {fileID: 2800000, guid: e60ead618bf021f4998017eff604400b, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_PS_Diffuse
-    second: {fileID: 2800000, guid: ca962d083bb3eea46988aa6d3336557d, type: 3}
+    second: {fileID: 2800000, guid: 0cc085cef8bac7a4e89af845b9075792, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_PS_Metallic
-    second: {fileID: 2800000, guid: 67928ee5a3d5a8b48826fdb6783fba37, type: 3}
+    second: {fileID: 2800000, guid: 831010853104e9243b389777f8afa989, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: JEM_PS_Normal
-    second: {fileID: 2800000, guid: 34cc4d033a741e946b39f40473abf893, type: 3}
+    second: {fileID: 2800000, guid: efa01b4d44908b341864dd03b77ea524, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MLI_Generic_Normal
-    second: {fileID: 2800000, guid: bf3be8b6f9a9a1e4fb903c17010ae3e3, type: 3}
+    second: {fileID: 2800000, guid: 8bd8ab818dab52b4988e9ad522aee70d, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MLM_Diffuse
-    second: {fileID: 2800000, guid: e6b3b922611f3ab4b8811138071d95d3, type: 3}
+    second: {fileID: 2800000, guid: 4f3891c00e9e42042a2ad531646b6348, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MLM_Metallic
-    second: {fileID: 2800000, guid: 0b9a74b8023a2c840894e4e33b89a0b3, type: 3}
+    second: {fileID: 2800000, guid: 4befbc763376ffc41b6b568eefce89aa, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MLM_Normal
-    second: {fileID: 2800000, guid: 45cb3fb97f7653847a63407d1e2b49c5, type: 3}
+    second: {fileID: 2800000, guid: 9ef35531fd9e9bb4bb73cfd7fe52f5d3, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MRM1_Diffuse
-    second: {fileID: 2800000, guid: 0a871e17638d0804ea69c3829b7b9131, type: 3}
+    second: {fileID: 2800000, guid: ea7db32ad25f8e34994153659049d1e5, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MRM1_Metallic
-    second: {fileID: 2800000, guid: 4de1885b0682fae4ea8c44dd2def2514, type: 3}
+    second: {fileID: 2800000, guid: c9e1d90aa92995a43b53fede45213ad6, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MRM1_Normal
-    second: {fileID: 2800000, guid: 1a89ca9127eddd147b0d923ab71ba825, type: 3}
+    second: {fileID: 2800000, guid: 2cbdf83e1b2dd3c4ab4e23afe826900f, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MRM2_Diffuse
-    second: {fileID: 2800000, guid: ad21ea9788e643f46ad8e2ce1fa09b68, type: 3}
+    second: {fileID: 2800000, guid: 75b4a87601d234e48b4d9286c2e03dcd, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MRM2_Metallic
-    second: {fileID: 2800000, guid: a6c6209ae78d5ca46a96c99deb430396, type: 3}
+    second: {fileID: 2800000, guid: f6e86054e49fe2e4eb2f4c5e24956e86, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: MRM2_Normal
-    second: {fileID: 2800000, guid: 04d767a06a9abc54b972e6abba297616, type: 3}
+    second: {fileID: 2800000, guid: d871c39285065d14c8dd0f7d4aef36e1, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Node1_Diffuse
-    second: {fileID: 2800000, guid: b44e5a272bee888498a3148fe2f3f2fc, type: 3}
+    second: {fileID: 2800000, guid: 5f5c7873988cd56478624f5159c515c4, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Node1_Metallic
-    second: {fileID: 2800000, guid: 1e84f5a48b5b8064587fb6e218a736f6, type: 3}
+    second: {fileID: 2800000, guid: 2d7a305386b304840b12c4a2e7443a86, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Node1_Normal
-    second: {fileID: 2800000, guid: 47c9575a7dfb4b448a67b9e0b6db94ec, type: 3}
+    second: {fileID: 2800000, guid: 84c755350f884ac40b41e76b0d592816, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Node2_Node3_Diffuse
-    second: {fileID: 2800000, guid: 128cb10de2b2e1d4d9f8431106318362, type: 3}
+    second: {fileID: 2800000, guid: 9f8e67a7aa561154e94008546680a087, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Node2_Node3_Metallic
-    second: {fileID: 2800000, guid: ce225cfdbf1634041b0fa1f3ff5d0d2a, type: 3}
+    second: {fileID: 2800000, guid: 30a34596d2e204f4dbf8b8d95b330925, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Node2_Node3_Normal
-    second: {fileID: 2800000, guid: 6126ad117d8a1094faf0ae420ae4e8ad, type: 3}
+    second: {fileID: 2800000, guid: 9152547e4da052045a8646f4410e0777, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: PMA_Diffuse2
-    second: {fileID: 2800000, guid: f08de5245497410468c26d4be92f4bd4, type: 3}
+    second: {fileID: 2800000, guid: 71cfd61293bdd544b995723ac4b72287, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: PMA_Metallic2
-    second: {fileID: 2800000, guid: 54fe68a6cd0324548aeb6f8b8207b690, type: 3}
+    second: {fileID: 2800000, guid: fd4ad710ff13d3246976f7dc3009dd2c, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: PMA_Normal
-    second: {fileID: 2800000, guid: 4e640f0041bbdd64abcb6e191025372f, type: 3}
+    second: {fileID: 2800000, guid: a77905a00212daa41b3c6590f254cbc2, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: PMM_Diffuse
-    second: {fileID: 2800000, guid: 2af4ef6592fcd604ca87a704fb267e9d, type: 3}
+    second: {fileID: 2800000, guid: 8bf182b2fc334c44eb4bf0f0e32e1777, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: PMM_Metallic
-    second: {fileID: 2800000, guid: ada98b1a7bd3cf14b8b13bfc4f37343b, type: 3}
+    second: {fileID: 2800000, guid: 914edf47b7ff4b04bb8c35f0ea9abbb4, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: PMM_Normal
-    second: {fileID: 2800000, guid: ebaff52a81889d146a32a2f57d4dc53f, type: 3}
+    second: {fileID: 2800000, guid: 6be8b0259fc968643bf4398c3cc611b8, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Russian Docking Module_Diffuse
-    second: {fileID: 2800000, guid: b06d26911ecdae44eb8da3ed56ca38ce, type: 3}
+    second: {fileID: 2800000, guid: de2c63c83fa442343bba36ac78dc126d, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Russian Docking Module_Metallic
-    second: {fileID: 2800000, guid: 9eeba541e5ce43c4c855a732306b9abc, type: 3}
+    second: {fileID: 2800000, guid: 829dc5689be03c14e947f99f5f531842, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Russian Docking Module_Normal
-    second: {fileID: 2800000, guid: 8def742ab3ef8d14891c7c6e9bf00669, type: 3}
+    second: {fileID: 2800000, guid: 7d0e3ceea435bec4890f0998388f7cd2, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: STP-H11_Diffuse
-    second: {fileID: 2800000, guid: 269659e193ae3a34789774872ee9afa9, type: 3}
+    second: {fileID: 2800000, guid: cc8808401750ea547b31d877bb3b88de, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: STP-H11_Metallic
-    second: {fileID: 2800000, guid: 1c18d33b7bb5f6b498650235d4f51aa5, type: 3}
+    second: {fileID: 2800000, guid: 07b743ad0b06a8c4c874ff51aaf19410, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: STP-H11_Normal
-    second: {fileID: 2800000, guid: 521c878b4b3004f4b8575d83af1bbc05, type: 3}
+    second: {fileID: 2800000, guid: 4b8c65d06a3d34b4380beb5ea9c8b189, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: STP-H8_Diffuse
-    second: {fileID: 2800000, guid: 07152ee72dab797489e3d826974b2083, type: 3}
+    second: {fileID: 2800000, guid: 8305216af93e75743bc85f1f8e250778, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: STP-H8_Metallic
-    second: {fileID: 2800000, guid: c2e3f1c372d4e47419781f7425144596, type: 3}
+    second: {fileID: 2800000, guid: ababe386982a23f4da29bf8fd898d956, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: STP-H8_Normal
-    second: {fileID: 2800000, guid: ef8530224dcd2514389b135de20e406f, type: 3}
+    second: {fileID: 2800000, guid: 1f9218da6fa64bd46a248de2325b2396, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: STP-H9_Diffuse
-    second: {fileID: 2800000, guid: 4c16c9ad000caa84da0e10e360bc3ef3, type: 3}
+    second: {fileID: 2800000, guid: ede7429aca3db304fb3e7cad7a58b351, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: STP-H9_Metallic
-    second: {fileID: 2800000, guid: d9c8647125409a64687e2ed4dc9cd591, type: 3}
+    second: {fileID: 2800000, guid: 22387434534debc42a58a11b0c3be3cb, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: STP-H9_Normal
-    second: {fileID: 2800000, guid: 42bfc0f458db3be40b0c537f86f1e8ad, type: 3}
+    second: {fileID: 2800000, guid: d5210883a4fa87c499639c8b991b9f63, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Truss_Diffuse
-    second: {fileID: 2800000, guid: 7997e77bcaf0a8546ae13f4f637061c8, type: 3}
+    second: {fileID: 2800000, guid: bf5b0d6547549b7469106670cd98c96e, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Truss_Metallic
-    second: {fileID: 2800000, guid: c997c7e76a88ea94080b38a9b58bb4dc, type: 3}
+    second: {fileID: 2800000, guid: 9d811d16576138e42b8bce67b6122f9a, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Truss_Normal
-    second: {fileID: 2800000, guid: d80f5d090aa44ad43926b1d45d242580, type: 3}
+    second: {fileID: 2800000, guid: fa38821e2bf5f40438090601d29c5ea2, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: USLab_Metallic
-    second: {fileID: 2800000, guid: 6e25647b392ba424e964eb4589b562f5, type: 3}
+    second: {fileID: 2800000, guid: 92dd186c64041c14ebbec25f1fdaba59, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: USLab_diffuse
-    second: {fileID: 2800000, guid: adcf0621ec8949047920abc0398fdb8c, type: 3}
+    second: {fileID: 2800000, guid: c5f3d27599b156545b12a0edaa233bf1, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: USLab_normal
-    second: {fileID: 2800000, guid: 5b72a8756c3ebcf4cb11c6429f1bf09e, type: 3}
+    second: {fileID: 2800000, guid: db4eaf2d1ba1a5146b8987d87148f361, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Zarya_Diffuse
-    second: {fileID: 2800000, guid: 84afe2f1c38c48141b9317b5e54a8478, type: 3}
+    second: {fileID: 2800000, guid: 20df26c1968960e4ba3f82f15ce95045, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Zarya_Metallic
-    second: {fileID: 2800000, guid: 06ec395c72a280542b721ed2741a0bb2, type: 3}
+    second: {fileID: 2800000, guid: 60be2eb81e351a24e87580f6856c820c, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Zarya_Normal
-    second: {fileID: 2800000, guid: d9c62d356e409ef4a96cb5e23a738eca, type: 3}
+    second: {fileID: 2800000, guid: a15e45241465d334e96a892129a16705, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Zvezda_Diffuse
-    second: {fileID: 2800000, guid: 7dd1b88875c2ce24e83003239a1b6429, type: 3}
+    second: {fileID: 2800000, guid: fd8330abfb58da94f9add1abc8a8c86a, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Zvezda_Metallic
-    second: {fileID: 2800000, guid: 3e1ca9f58dc40d549a6336a3d34b468e, type: 3}
+    second: {fileID: 2800000, guid: 2774faf54537ba14eb590cd363542379, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: Zvezda_Normal
-    second: {fileID: 2800000, guid: c186434f48a192e48bf3ac6199a44823, type: 3}
+    second: {fileID: 2800000, guid: 3fd4e7be8470ff848af4a1856922112b, type: 3}
   - first:
       type: UnityEngine:Texture2D
       assembly: UnityEngine.CoreModule
       name: letters
-    second: {fileID: 2800000, guid: b55c1bb815bed9e4583bcbb01d2856af, type: 3}
+    second: {fileID: 2800000, guid: 7d8ca157e0eabbc4cbb328d399fb597f, type: 3}
   materials:
     materialImportMode: 2
     materialName: 0

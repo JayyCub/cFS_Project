@@ -93,9 +93,10 @@ static class PetalColliderBuilder
 
         var collider = t.GetComponent<MeshCollider>();
         if (collider == null) collider = Undo.AddComponent<MeshCollider>(t.gameObject);
-        collider.sharedMesh = mf.sharedMesh;
-        collider.convex     = true; // required — descendant of ChaserVehicle's non-kinematic Rigidbody
-        collider.isTrigger  = false;
+        collider.sharedMesh     = mf.sharedMesh;
+        collider.convex         = true; // required — descendant of ChaserVehicle's non-kinematic Rigidbody
+        collider.isTrigger      = false;
+        collider.sharedMaterial = DockingPhysicsMaterial.GetOrCreate();
 
         EditorUtility.SetDirty(t.gameObject);
         Debug.Log($"[PetalColliderBuilder] '{label}': convex MeshCollider <- {mf.sharedMesh.vertexCount} verts.");

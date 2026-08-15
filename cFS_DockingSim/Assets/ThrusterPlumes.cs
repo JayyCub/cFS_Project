@@ -106,6 +106,13 @@ public class ThrusterPlumes : MonoBehaviour
     [Header("Shared cone settings")]
     [Tooltip("Number of triangular facets around the cone circumference.")]
     public int coneSegments = 20;
+    [Tooltip("How far to bury the cone's apex behind the nozzle mouth, inside the thruster body " +
+             "(meters). A real plume doesn't pinch to an infinitely thin point right at the nozzle " +
+             "exit — sliding the tip back here means the mesh already has some width by the time it " +
+             "reaches the visible mouth, and the buried segment is simply hidden inside the " +
+             "thruster's own geometry. Cone length beyond the mouth (coreLengthMeters/haloLengthMeters) " +
+             "is unchanged; this just extends the hidden tail behind it.")]
+    public float noseRecessMeters = 0.1f;
     [Tooltip("How fast the plume's visible leading edge travels outward from the nozzle (m/s), and " +
              "the trailing edge chases it once firing stops. This is what makes the plume actually " +
              "emerge/recede instead of the whole cone just fading its brightness in place. Lower = " +
@@ -121,6 +128,7 @@ public class ThrusterPlumes : MonoBehaviour
     private float[]               _coreTail;
     private float[]               _haloFront;
     private float[]               _haloTail;
+    private bool[]                _wasFiring;
     private MaterialPropertyBlock _propBlock;
 
     void Start()
@@ -199,8 +207,8 @@ public class ThrusterPlumes : MonoBehaviour
         haloMat.SetColor("_Color", new Color(0.85f, 0.9f, 0.95f, 1f));
         haloMat.SetFloat("_NoiseScale", 1.6f);
 
-        var coreMesh = BuildConeMesh(coreLengthMeters, coreAngleDeg, coneSegments);
-        var haloMesh = BuildConeMesh(haloLengthMeters, haloAngleDeg, coneSegments);
+        var coreMesh = BuildConeMesh(coreLengthMeters + noseRecessMeters, coreAngleDeg, coneSegments);
+        var haloMesh = BuildConeMesh(haloLengthMeters + noseRecessMeters, haloAngleDeg, coneSegments);
 
         _coreRenderers   = new MeshRenderer[transforms.Length];
         _haloRenderers   = new MeshRenderer[transforms.Length];
@@ -225,7 +233,10 @@ public class ThrusterPlumes : MonoBehaviour
         var go = new GameObject(name) { hideFlags = HideFlags.DontSave };
         go.transform.SetParent(parent, false);
         // No local rotation: cone mesh is built with tip along local +Z,
-        // which already aligns with the thruster's exhaust direction.
+        // which already aligns with the thruster's exhaust direction. Slid back along
+        // -Z by noseRecessMeters so the mesh's apex (built at local z=0) lands behind
+        // the nozzle mouth, buried inside the thruster body — see BuildConeMesh callers.
+        go.transform.localPosition = new Vector3(0f, 0f, -noseRecessMeters);
 
         var mf = go.AddComponent<MeshFilter>();
         mf.sharedMesh = mesh;
@@ -328,10 +339,27 @@ public class ThrusterPlumes : MonoBehaviour
         if (driveLegacyParticlePlumes && _plumes != null && _plumes.Length > count)
             count = _plumes.Length;
 
+        if (_wasFiring == null || _wasFiring.Length < count)
+            _wasFiring = new bool[count];
+
         for (int i = 0; i < count; i++)
         {
             float t      = _rcs.GetThrottle(i);
             bool  firing = t >= throttleThreshold;
+
+            // Re-ignition while the previous packet is still draining out (front/tail
+            // mid-travel from the last shot) must NOT inherit that already-advanced front
+            // position — otherwise the very first frame of firing reveals everything from
+            // the nozzle out to wherever the old front had drifted to, i.e. the whole cone
+            // popping in at once instead of plume-ing out. Resetting front here only on the
+            // rising edge of firing (not every frame) restarts the grow-from-nozzle
+            // animation cleanly, whether this is a cold start or a re-fire mid-drain.
+            if (firing && !_wasFiring[i])
+            {
+                if (_coreFront != null && i < _coreFront.Length) _coreFront[i] = 0f;
+                if (_haloFront != null && i < _haloFront.Length) _haloFront[i] = 0f;
+            }
+            _wasFiring[i] = firing;
 
             if (driveLegacyParticlePlumes && _plumes != null && i < _plumes.Length)
             {
@@ -354,11 +382,11 @@ public class ThrusterPlumes : MonoBehaviour
             }
 
             UpdateCone(_coreRenderers, _coreIntensities, _coreFront, _coreTail, i, firing,
-                       corePeakIntensity, coreFadeTime, coreLengthMeters,
+                       corePeakIntensity, coreFadeTime, coreLengthMeters + noseRecessMeters,
                        new ConeStyle(coreFresnelPower, coreFresnelMin, coreNoiseStrength,
                                       coreScrollSpeed, coreEdgeSoftness, coreDistanceFalloffPower));
             UpdateCone(_haloRenderers, _haloIntensities, _haloFront, _haloTail, i, firing,
-                       haloPeakIntensity, haloFadeTime, haloLengthMeters,
+                       haloPeakIntensity, haloFadeTime, haloLengthMeters + noseRecessMeters,
                        new ConeStyle(haloFresnelPower, haloFresnelMin, haloNoiseStrength,
                                       haloScrollSpeed, haloEdgeSoftness, haloDistanceFalloffPower));
         }

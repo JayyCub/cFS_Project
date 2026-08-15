@@ -74,9 +74,10 @@ static class DockingPortColliderBuilder
         var collider = t.GetComponent<MeshCollider>();
         if (collider == null) collider = Undo.AddComponent<MeshCollider>(t.gameObject);
 
-        collider.sharedMesh = mf.sharedMesh;
-        collider.convex     = false; // real concave detail preserved — kinematic ancestor allows this
-        collider.isTrigger  = false;
+        collider.sharedMesh     = mf.sharedMesh;
+        collider.convex         = false; // real concave detail preserved — kinematic ancestor allows this
+        collider.isTrigger      = false;
+        collider.sharedMaterial = DockingPhysicsMaterial.GetOrCreate();
 
         EditorUtility.SetDirty(t.gameObject);
         Debug.Log($"[DockingPortColliderBuilder] '{label}': MeshCollider <- {mf.sharedMesh.vertexCount} verts (non-convex).");

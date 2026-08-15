@@ -42,7 +42,7 @@ public class TelemetryLogger : MonoBehaviour
     {
         writer.WriteLine(
             "MET_s," +
-            "Range_m,ClosingSpeed_ms,LateralOffset_m,AttitudeError_deg," +
+            "Range_m,ClosingSpeed_ms,LateralOffset_m,AttitudeError_deg,RollError_deg," +
             "Pos_X,Pos_Y,Pos_Z," +
             "Vel_X,Vel_Y,Vel_Z," +
             "AngVel_X,AngVel_Y,AngVel_Z," +
@@ -70,7 +70,7 @@ public class TelemetryLogger : MonoBehaviour
 
         writer.WriteLine(
             $"{missionTime:F3}," +
-            $"{nav.range:F4},{nav.closingSpeed:F4},{nav.lateralOffset:F4},{nav.attitudeError:F4}," +
+            $"{nav.range:F4},{nav.closingSpeed:F4},{nav.lateralOffset:F4},{nav.attitudeError:F4},{nav.rollError:F4}," +
             $"{pos.x:F4},{pos.y:F4},{pos.z:F4}," +
             $"{vel.x:F4},{vel.y:F4},{vel.z:F4}," +
             $"{angVel.x:F6},{angVel.y:F6},{angVel.z:F6}," +

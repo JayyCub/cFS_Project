@@ -131,7 +131,7 @@ MeshCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 25273627}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: 162d038ab71745c41b28013186c57a66, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -222,7 +222,7 @@ MeshCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 138392904}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: 162d038ab71745c41b28013186c57a66, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -249,7 +249,7 @@ MeshCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 155065319}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: 162d038ab71745c41b28013186c57a66, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -10087,7 +10087,7 @@ MeshCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 326867317}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: 162d038ab71745c41b28013186c57a66, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -25299,7 +25299,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startSizeY:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 1
       minScalar: 1
       maxCurve:
@@ -25352,7 +25352,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startSizeZ:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 1
       minScalar: 1
       maxCurve:
@@ -25405,7 +25405,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startRotationX:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 0
       minScalar: 0
       maxCurve:
@@ -25458,7 +25458,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startRotationY:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 0
       minScalar: 0
       maxCurve:
@@ -35369,7 +35369,7 @@ MeshCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1273296606}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: 162d038ab71745c41b28013186c57a66, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -45132,7 +45132,7 @@ MeshCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1456561414}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: 162d038ab71745c41b28013186c57a66, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -50126,7 +50126,7 @@ Rigidbody:
   serializedVersion: 5
   m_Mass: 12000
   m_LinearDamping: 0
-  m_AngularDamping: 0
+  m_AngularDamping: 0.15
   m_CenterOfMass: {x: 0, y: 0, z: 0}
   m_InertiaTensor: {x: 1, y: 1, z: 1}
   m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
@@ -50173,7 +50173,7 @@ Transform:
   m_GameObject: {fileID: 1569440113}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: -5.572, z: -16.91}
+  m_LocalPosition: {x: -0.000000053519408, y: -5.561, z: -16.927216}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -50236,7 +50236,7 @@ MonoBehaviour:
   driveLegacyParticlePlumes: 1
   _plumes: []
   maxEmissionRate: 5000
-  maxStartSpeed: 100
+  maxStartSpeed: 50
   maxStartSize: 0.16
   particleLifetimeMin: 0.05
   particleLifetimeMax: 0.15
@@ -50245,14 +50245,14 @@ MonoBehaviour:
   particleSizeGrowthEnd: 1
   particleColor: {r: 0.92, g: 0.95, b: 1, a: 0.22745098}
   throttleThreshold: 0.001
-  coreLengthMeters: 3
+  coreLengthMeters: 5
   coreAngleDeg: 5
   corePeakIntensity: 10
   coreNoiseStrength: 0.5
   coreFresnelPower: 3.5
   coreFresnelMin: 0.3
   coreFadeTime: 0.05
-  coreScrollSpeed: 100
+  coreScrollSpeed: 50
   coreEdgeSoftness: 0.18
   coreDistanceFalloffPower: 4
   haloLengthMeters: 18
@@ -50262,11 +50262,12 @@ MonoBehaviour:
   haloFresnelPower: 0.08
   haloFresnelMin: 0.175
   haloFadeTime: 0.05
-  haloScrollSpeed: 100
+  haloScrollSpeed: 50
   haloEdgeSoftness: 0.5
   haloDistanceFalloffPower: 4
   coneSegments: 20
-  plumeSpeed: 100
+  noseRecessMeters: 0.3
+  plumeSpeed: 50
 --- !u!1 &1586210274
 GameObject:
   m_ObjectHideFlags: 0
@@ -70192,7 +70193,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startSizeY:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 1
       minScalar: 1
       maxCurve:
@@ -70245,7 +70246,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startSizeZ:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 1
       minScalar: 1
       maxCurve:
@@ -70298,7 +70299,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startRotationX:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 0
       minScalar: 0
       maxCurve:
@@ -70351,7 +70352,7 @@ ParticleSystem:
         m_RotationOrder: 4
     startRotationY:
       serializedVersion: 2
-      minMaxState: 0
+      minMaxState: 3
       scalar: 0
       minScalar: 0
       maxCurve:

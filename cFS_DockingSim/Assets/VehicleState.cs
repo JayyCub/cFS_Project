@@ -33,6 +33,13 @@ public class VehicleState : MonoBehaviour
              "attempt) — capping it converts that into a slow, bounded separation instead. Only applies " +
              "while colliders are actually overlapping; has no effect on normal flight.")]
     public float maxDepenetrationVelocity = 0.5f;
+    [Tooltip("Caps angular speed (rad/s), same reasoning as maxDepenetrationVelocity but for " +
+             "rotation: an off-center contact (e.g. a convex petal hull catching a corner against " +
+             "the station's concave mesh at an angle) applies torque with no equivalent PhysX limit, " +
+             "so a single step can spin the body up to an arbitrary rate — seen as the ship 'teleporting' " +
+             "between orientations frame-to-frame rather than visibly rotating. Real RCS-driven docking " +
+             "rates are a small fraction of a rad/s, so this is a generous ceiling, not an operational limit.")]
+    public float maxAngularVelocity = 1.0f;
 
     private Rigidbody rb;
 
@@ -54,6 +61,7 @@ public class VehicleState : MonoBehaviour
         }
 
         rb.maxDepenetrationVelocity = maxDepenetrationVelocity;
+        rb.maxAngularVelocity       = maxAngularVelocity;
 
         // Apply CoM override first (RCSModel.DelayedInit reads this via rb.centerOfMass).
         Debug.Log($"[VehicleState] {gameObject.name} mesh CoM (local) = {rb.centerOfMass:F3}");

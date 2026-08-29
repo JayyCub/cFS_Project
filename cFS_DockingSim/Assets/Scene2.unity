@@ -30133,6 +30133,7 @@ MonoBehaviour:
   shapeLength: 6
   centerOfMassOverride: {x: 0, y: 0, z: 0}
   maxDepenetrationVelocity: 0.5
+  maxAngularVelocity: 1
 --- !u!54 &805607288
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -50116,6 +50117,7 @@ MonoBehaviour:
   shapeLength: 6
   centerOfMassOverride: {x: 0, y: 0, z: -4}
   maxDepenetrationVelocity: 0.5
+  maxAngularVelocity: 1
 --- !u!54 &1569440116
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -50172,8 +50174,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1569440113}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.000000053519408, y: -5.561, z: -16.927216}
+  m_LocalRotation: {x: 0.09531095, y: 0.12456438, z: 0.095778175, w: 0.98296803}
+  m_LocalPosition: {x: 7.4509964, y: -3.1351237, z: -54.01745}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -50197,7 +50199,7 @@ Transform:
   - {fileID: 688609617}
   - {fileID: 1758605400}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 9.411, y: 15.47, z: 12.412}
 --- !u!114 &1569440121
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -79500,6 +79502,7 @@ GameObject:
   - component: {fileID: 2028270421}
   - component: {fileID: 2028270422}
   - component: {fileID: 2028270423}
+  - component: {fileID: 2028270424}
   m_Layer: 0
   m_Name: SimulationManager
   m_TagString: Untagged
@@ -79752,6 +79755,36 @@ MonoBehaviour:
   linearEnvelope: 0.02
   linearStopSpring: 0
   linearStopDamper: 50000
+--- !u!114 &2028270424
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2028270409}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6d333ba5efab4cd48a13b56a8f01c355, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DockingContactConstraint
+  nav: {fileID: 2028270415}
+  dockingDetector: {fileID: 2028270414}
+  chaserRigidbody: {fileID: 1569440116}
+  chaserPort: {fileID: 726466886}
+  targetPort: {fileID: 1466842064}
+  chaserDockingColliders:
+  - {fileID: 138392908}
+  - {fileID: 25273631}
+  - {fileID: 326867321}
+  targetDockingColliders:
+  - {fileID: 1273296610}
+  - {fileID: 1456561418}
+  - {fileID: 155065323}
+  contactRange: 0.5
+  maxInterlockDepth: 0.12
+  funnelLateralCapture: 0.25
+  funnelAttitudeCaptureDeg: 20
+  funnelRollCaptureDeg: 20
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

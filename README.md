@@ -359,3 +359,17 @@ APPROACH phase, 2.91 m out, final closure with attitude gauges in frame:
 DOCKED:
 
 ![Utility UI — DOCKED](Docs/Utility_UI_Docked.png)
+
+**August 29th Update: UI Toolkit Rewrite**
+
+Spent today ripping out the Canvas-based HUD from the July 21st update and rebuilding it on Unity's UI Toolkit (UXML/USS) instead of hand-built RectTransform hierarchies constructed line-by-line in C#. Layout, colors, and spacing now live in stylesheet files that can be tweaked directly — including live in the Editor's UI Builder — without touching C# or recompiling. Also simplified the dual-mode Stream/Utility toggle down to a single always-visible layout, swapped the attitude gauges for plain roll/pitch/yaw + rate-of-change readouts, and moved the debug panel's show/hide from an on-screen tab to a keyboard shortcut (F3) after its position kept fighting the slide-out animation.
+
+Also landed a scripted docking-alignment funnel (`DockingContactConstraint.cs`) that replaces real mesh contact between the chaser petals and the station port during final approach — removes the "glitching away" instability from convex-hull-vs-concave-mesh contact while still camming a slightly misaligned ship into alignment as it seats.
+
+APPROACH phase, 2.99 m out, looking through the docking ring at Columbus with the rebuilt HUD:
+
+![Docking-camera view through the ring, 2.99m out, new UI Toolkit HUD](Docs/Unity_Scene_POV_8_29.png)
+
+APPROACH phase, 3.83 m out, RCS thrusters firing on final approach:
+
+![Wide view of Dragon on approach with RCS plumes firing, new UI Toolkit HUD](Docs/Unity_Scene_Wide_8_29.png)

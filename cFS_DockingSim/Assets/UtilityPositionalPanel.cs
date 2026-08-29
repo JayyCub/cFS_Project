@@ -1,31 +1,17 @@
 using UnityEngine;
-using UnityEngine.UI;
+using UnityEngine.UIElements;
 
 /// <summary>
 /// Left-edge Utility-mode panel: absorbs the old DockingHUD top-left box (Range/Closing/
 /// Lateral/Attitude/Corridor/GNC-phase/docked-status, same green/red threshold coloring
-/// against DockingDetector's max* fields) plus three RadialGauge dials for absolute vehicle
-/// attitude. RDM status moved to UtilityDebugPanel instead of duplicating it here.
-///
-/// IMPORTANT: the three gauges use chaser.attitude/angularVelocity (absolute vehicle
-/// orientation), NOT nav.pitchError/yawError/rollError (docking-port *alignment* error — a
-/// different quantity). Same euler-normalize / body-frame-rate math as the old
-/// DockingHUD.RefreshHudCache.
+/// against DockingDetector's max* fields) plus absolute Roll/Pitch/Yaw and their rate of
+/// change. RDM status moved to UtilityDebugPanel instead of duplicating it here.
 /// </summary>
-[RequireComponent(typeof(RectTransform))]
 public class UtilityPositionalPanel : MonoBehaviour
 {
-    const float PanelWidth   = 280f;
-    const float RowHeight    = 20f;
-    const float HeaderHeight = 22f;
-    const float GaugeSize    = 68f;
-    const float Pad          = 10f;
-    const float SectionGap   = 14f;
+    const float PanelWidth = 280f;
 
-    static readonly Color PanelBg     = new Color(0f, 0f, 0f, 0.62f);
-    static readonly Color HeaderColor = new Color(0.62f, 0.82f, 1f, 0.88f);
-    static readonly Color LabelColor  = new Color(0.62f, 0.62f, 0.62f, 1f);
-    static readonly Color VelColor    = new Color(1f, 0.88f, 0.55f, 1f);
+    static readonly Color VelColor = new Color(1f, 0.88f, 0.55f, 1f);
 
     static readonly string[] GncPhaseNames = { "IDLE", "CORRECT", "APPROACH", "DOCKED", "HOLD" };
     static readonly Color[]  GncPhaseColors =
@@ -45,93 +31,81 @@ public class UtilityPositionalPanel : MonoBehaviour
     private float              _refreshInterval;
     private float              _nextRefresh;
 
-    private Text _rangeVal, _closingVal, _lateralVal, _attitudeVal, _corridorVal, _gncVal, _statusVal;
-    private RadialGauge _rollGauge, _pitchGauge, _yawGauge;
-    private Text _vxVal, _vyVal, _vzVal;
+    private Label _rangeVal, _closingVal, _lateralVal, _attitudeVal, _corridorVal, _gncVal, _statusVal;
+    private Label _rollVal, _pitchVal, _yawVal;
+    private Label _rollRocVal, _pitchRocVal, _yawRocVal;
+    private Label _vxVal, _vyVal, _vzVal;
 
-    public void Initialize(RelativeNav nav, DockingDetector detector, RateDamping rateDamping,
+    public void Initialize(VisualElement parent, RelativeNav nav, DockingDetector detector, RateDamping rateDamping,
         ApproachCorridor corridor, VehicleState chaser, UdpCommandReceiver cfsReceiver, float refreshInterval)
     {
         _nav = nav; _detector = detector; _corridor = corridor;
         _chaser = chaser; _cfsReceiver = cfsReceiver; _refreshInterval = refreshInterval;
 
-        int dockingRows = 4 + (corridor != null ? 1 : 0) + (cfsReceiver != null ? 1 : 0) + (detector != null ? 1 : 0);
-        float gaugeLabelSpace = RadialGauge.LabelGap + RadialGauge.LabelHeight;
-        float height = Pad * 2f + HeaderHeight + dockingRows * RowHeight + SectionGap
-                     + HeaderHeight + gaugeLabelSpace + GaugeSize + SectionGap + 3f * RowHeight;
+        // Always-visible panel, no slide-out/collapse -- unlike the debug/thruster panels,
+        // this one stays permanently on screen, so there's no SlideOutPanel/tab here.
+        //
+        // Centered via flexbox (an invisible full-screen "anchor" with justify-content/
+        // align-items) rather than computed pixel offsets -- a reactive GeometryChangedEvent
+        // measurement of Content's height kept needing rework as rows were added/removed in
+        // the UXML, and the same approach broke outright for the thruster panel (see
+        // UtilityThrusterPanel.Initialize). Flexbox centering doesn't need to know Body's size
+        // at all, so it can't drift out of sync with however many rows the UXML ends up with.
+        var anchor = new VisualElement { name = "PositionalAnchor" };
+        anchor.style.position = Position.Absolute;
+        anchor.style.left = 0; anchor.style.right = 0; anchor.style.top = 0; anchor.style.bottom = 0;
+        anchor.style.justifyContent = Justify.Center;  // vertical centering (main axis, column direction)
+        anchor.style.alignItems     = Align.FlexStart; // pin to the left edge (cross axis)
+        anchor.style.paddingLeft    = 0f;              // gap from the screen's left edge (0 = flush)
+        parent.Add(anchor);
 
-        var size = new Vector2(PanelWidth, height);
-        var rt   = (RectTransform)transform;
-        // Top-left corner of screen, 12px in from each edge — same origin the old DockingHUD box used.
-        UIFactory.SetAnchor(rt, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(12f, -12f), size);
+        var body = new VisualElement { name = "Body" };
+        body.AddToClassList("panel");
+        // Override .panel's `position: absolute` -- Body needs to be a normal-flow child of
+        // `anchor` for justify-content/align-items to actually center it; an absolutely
+        // positioned child is removed from flex layout entirely and ignores both.
+        body.style.position = Position.Relative;
+        body.style.width = PanelWidth;
+        anchor.Add(body);
 
-        var slide = gameObject.AddComponent<SlideOutPanel>();
-        slide.Initialize(SlideEdge.Left, size, PanelBg);
+        var template = Resources.Load<VisualTreeAsset>("UI/UtilityPositionalPanel");
+        var content  = template.Instantiate();
+        body.Add(content);
 
-        BuildContent(slide.Content, dockingRows);
-    }
+        _rangeVal    = content.Q<Label>("RangeValue");
+        _closingVal  = content.Q<Label>("ClosingValue");
+        _lateralVal  = content.Q<Label>("LateralValue");
+        _attitudeVal = content.Q<Label>("AttitudeValue");
 
-    void BuildContent(RectTransform content, int dockingRows)
-    {
-        float y = Pad;
-        AddHeader(content, ref y, "DOCKING");
+        var corridorRow = content.Q<VisualElement>("Corridor");
+        var gncRow      = content.Q<VisualElement>("GNC");
+        var statusRow   = content.Q<VisualElement>("Status");
 
-        _rangeVal    = AddRow(content, ref y, "RANGE",    "-- m");
-        _closingVal  = AddRow(content, ref y, "CLOSING",  "-- m/s");
-        _lateralVal  = AddRow(content, ref y, "LATERAL",  "-- m");
-        _attitudeVal = AddRow(content, ref y, "ATTITUDE", "-- deg");
-        if (_corridor    != null) _corridorVal = AddRow(content, ref y, "CORRIDOR", "--");
-        if (_cfsReceiver != null) _gncVal      = AddRow(content, ref y, "GNC",      "---");
-        if (_detector    != null) _statusVal   = AddRow(content, ref y, "STATUS",   "APPROACHING");
+        // Guard every lookup with a null check, not just the data-source condition: this UXML
+        // is being hand-edited in UI Builder, and a renamed/missing element here previously
+        // threw a NullReferenceException that aborted Initialize() before it ever reached the
+        // gauge-construction lines below -- silently leaving the gauges empty instead of
+        // failing loudly at the row that actually broke.
+        if (corridor != null) _corridorVal = content.Q<Label>("CorridorValue");
+        else if (corridorRow != null) corridorRow.style.display = DisplayStyle.None;
 
-        y += SectionGap;
-        AddHeader(content, ref y, "VEHICLE STATE");
-        y += RadialGauge.LabelGap + RadialGauge.LabelHeight; // room for the axis label above each dial
+        if (cfsReceiver != null) _gncVal = content.Q<Label>("GNCValue");
+        else if (gncRow != null) gncRow.style.display = DisplayStyle.None;
 
-        float gaugeCenterY = y + GaugeSize / 2f;
-        _rollGauge  = CreateGauge(content, "ROLL",  new Vector2(Pad + GaugeSize / 2f, -gaugeCenterY));
-        _pitchGauge = CreateGauge(content, "PITCH", new Vector2(PanelWidth / 2f, -gaugeCenterY));
-        _yawGauge   = CreateGauge(content, "YAW",   new Vector2(PanelWidth - Pad - GaugeSize / 2f, -gaugeCenterY));
-        y += GaugeSize + SectionGap;
+        if (detector != null) _statusVal = content.Q<Label>("StatusValue");
+        else if (statusRow != null) statusRow.style.display = DisplayStyle.None;
 
-        _vxVal = AddRow(content, ref y, "Vx", "+0.000 m/s", VelColor);
-        _vyVal = AddRow(content, ref y, "Vy", "+0.000 m/s", VelColor);
-        _vzVal = AddRow(content, ref y, "Vz", "+0.000 m/s", VelColor);
-    }
+        _rollVal  = content.Q<Label>("RollValue");
+        _pitchVal = content.Q<Label>("PitchValue");
+        _yawVal   = content.Q<Label>("YawValue");
 
-    Text AddHeader(RectTransform content, ref float y, string text)
-    {
-        var hdr = UIFactory.CreateText(content, $"{text}_Header", text, 13, HeaderColor, TextAnchor.MiddleLeft);
-        UIFactory.SetAnchor(hdr.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(Pad, -y), new Vector2(PanelWidth - Pad * 2f, HeaderHeight));
-        y += HeaderHeight;
-        return hdr;
-    }
+        _rollRocVal  = content.Q<Label>("RollROCValue");
+        _pitchRocVal = content.Q<Label>("PitchROCValue");
+        _yawRocVal   = content.Q<Label>("YawROCValue");
 
-    Text AddRow(RectTransform content, ref float y, string label, string initialValue, Color? valueColor = null)
-    {
-        var lbl = UIFactory.CreateText(content, $"{label}_Label", label, 12, LabelColor, TextAnchor.MiddleLeft);
-        UIFactory.SetAnchor(lbl.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(Pad, -y), new Vector2(90f, RowHeight));
-
-        var val = UIFactory.CreateText(content, $"{label}_Value", initialValue, 12, valueColor ?? Color.white, TextAnchor.MiddleRight);
-        UIFactory.SetAnchor(val.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f),
-            new Vector2(-Pad, -y), new Vector2(150f, RowHeight));
-
-        y += RowHeight;
-        return val;
-    }
-
-    RadialGauge CreateGauge(RectTransform content, string label, Vector2 centerOffset)
-    {
-        var go = new GameObject($"Gauge_{label}", typeof(RectTransform));
-        go.transform.SetParent(content, false);
-        UIFactory.SetAnchor((RectTransform)go.transform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(0.5f, 0.5f), centerOffset, Vector2.zero);
-
-        var gauge = go.AddComponent<RadialGauge>();
-        gauge.Initialize(label, GaugeSize);
-        return gauge;
+        _vxVal = content.Q<Label>("VxValue");
+        _vyVal = content.Q<Label>("VyValue");
+        _vzVal = content.Q<Label>("VzValue");
     }
 
     void Update()
@@ -158,31 +132,36 @@ public class UtilityPositionalPanel : MonoBehaviour
             bool connected = _cfsReceiver.CfsActive;
             _gncVal.text  = (!connected) ? "---"
                           : (phase >= 0 && phase < GncPhaseNames.Length) ? GncPhaseNames[phase] : "???";
-            _gncVal.color = (connected && phase >= 0 && phase < GncPhaseColors.Length)
+            _gncVal.style.color = (connected && phase >= 0 && phase < GncPhaseColors.Length)
                 ? GncPhaseColors[phase] : new Color(0.50f, 0.50f, 0.50f, 1f);
         }
 
         if (_detector != null && _statusVal != null)
         {
-            _statusVal.text  = _detector.isDocked ? "DOCKED" : "APPROACHING";
-            _statusVal.color = _detector.isDocked ? Color.green : new Color(0.62f, 0.62f, 0.62f, 1f);
+            _statusVal.text = _detector.isDocked ? "DOCKED" : "APPROACHING";
+            _statusVal.style.color = _detector.isDocked ? Color.green : new Color(0.62f, 0.62f, 0.62f, 1f);
         }
 
         if (_chaser == null) return;
 
+        // Absolute vehicle orientation (0-360, raw) -- NOT nav.pitchError/yawError/rollError,
+        // which is docking-port *alignment* error, a different quantity. Vehicle attitude
+        // legitimately sweeps the full circle as it tumbles, so these are shown unsigned/raw
+        // rather than normalized to +-180.
         Vector3 euler = _chaser.attitude.eulerAngles;
-        float roll  = Normalize(euler.z);
-        float pitch = Normalize(euler.x);
-        float yaw   = Normalize(euler.y);
+        SetRow(_rollVal,  $"{Mathf.Repeat(euler.z, 360f):F1}°", true, Color.white);
+        SetRow(_pitchVal, $"{Mathf.Repeat(euler.x, 360f):F1}°", true, Color.white);
+        SetRow(_yawVal,   $"{Mathf.Repeat(euler.y, 360f):F1}°", true, Color.white);
 
+        // Body-frame angular rate (deg/s), signed -- same convention the old RadialGauge's
+        // rate readout used.
         Vector3 bodyAngVel = Quaternion.Inverse(_chaser.attitude) * _chaser.angularVelocity;
         float rollRate  = bodyAngVel.z * Mathf.Rad2Deg;
         float pitchRate = bodyAngVel.x * Mathf.Rad2Deg;
         float yawRate   = bodyAngVel.y * Mathf.Rad2Deg;
-
-        _rollGauge?.SetValue(euler.z, rollRate);
-        _pitchGauge?.SetValue(euler.x, pitchRate);
-        _yawGauge?.SetValue(euler.y, yawRate);
+        SetRow(_rollRocVal,  $"{rollRate:+0.0;-0.0} d/s",  true, Color.white);
+        SetRow(_pitchRocVal, $"{pitchRate:+0.0;-0.0} d/s", true, Color.white);
+        SetRow(_yawRocVal,   $"{yawRate:+0.0;-0.0} d/s",   true, Color.white);
 
         Vector3 bodyVel = Quaternion.Inverse(_chaser.attitude) * _chaser.velocity;
         SetRow(_vxVal, $"{bodyVel.x:+0.000;-0.000} m/s", true, VelColor);
@@ -190,12 +169,10 @@ public class UtilityPositionalPanel : MonoBehaviour
         SetRow(_vzVal, $"{bodyVel.z:+0.000;-0.000} m/s", true, VelColor);
     }
 
-    static void SetRow(Text field, string text, bool good, Color? fixedColor = null)
+    static void SetRow(Label field, string text, bool good, Color? fixedColor = null)
     {
         if (field == null) return;
-        field.text  = text;
-        field.color = fixedColor ?? (good ? Color.green : Color.red);
+        field.text = text;
+        field.style.color = fixedColor ?? (good ? Color.green : Color.red);
     }
-
-    static float Normalize(float angle) => angle > 180f ? angle - 360f : angle;
 }

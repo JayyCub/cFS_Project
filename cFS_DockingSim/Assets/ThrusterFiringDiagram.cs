@@ -1,5 +1,5 @@
 using UnityEngine;
-using UnityEngine.UI;
+using UnityEngine.UIElements;
 
 /// <summary>
 /// Ring diagram of the 16 RCS thrusters, built from the Dragon-UI art (Assets/Dragon_UI):
@@ -7,23 +7,26 @@ using UnityEngine.UI;
 /// thruster, each animated to match the source art's own keyframes/opacity levels rather than
 /// an invented brightness curve:
 ///
-///  - T00-T03 (orbital lockout — see RCSModel.OrbitalLockoutMask, never fire during docking):
+///  - T00-T03 (orbital lockout -- see RCSModel.OrbitalLockoutMask, never fire during docking):
 ///    a static dim dot. Included for completeness even though they never activate.
 ///  - T04-T07 ("large" thrusters): a dot that steps through the source art's 7-keyframe
 ///    opacity sequence (50/75/100/100/84/68/50%) plus a black ring that appears at full
 ///    activation and fades out during release, driven by a single continuous `_largeProgress`
 ///    value per thruster (see UpdateLarge) so brief/PWM-style pulses interrupt and reverse
 ///    smoothly instead of snapping.
-///  - T08-T15 ("small" thrusters): a simple two-channel crossfade — dot opacity 50%->100%,
-///    plume opacity 0%->50% — eased in/out together, matching the source art's two paired
+///  - T08-T15 ("small" thrusters): a simple two-channel crossfade -- dot opacity 50%->100%,
+///    plume opacity 0%->50% -- eased in/out together, matching the source art's two paired
 ///    layers. The plume points tangentially, not at the diagram's center: yaw (T08-T11) and
 ///    pitch (T12-T15) fire in opposite rotational directions around the ring to form a torque
 ///    couple, so their plumes point opposite ways rather than both inward (see BuildDots).
 ///
 /// Reused compact (Stream mode corner) and detailed (Utility mode right panel, larger) via the
 /// `detailed` flag passed to Initialize().
+///
+/// Built from VisualElements rather than RectTransforms: position/rotation math is unchanged
+/// from the original, but ported across the Y-up (RectTransform) -> Y-down (UI Toolkit) axis
+/// flip -- see the comments in BuildDots/plume setup for the sign flips that requires.
 /// </summary>
-[RequireComponent(typeof(RectTransform))]
 public class ThrusterFiringDiagram : MonoBehaviour
 {
     const int ThrusterCount = 16;
@@ -35,10 +38,10 @@ public class ThrusterFiringDiagram : MonoBehaviour
     const float DotSizeScale    = 0.67f; // global size trim applied to every dot (both tiers); ring/plume sizes derive from dot size so they shrink to match automatically
 
     // Layout: traced from dragon_ui_reference.svg, which lays out all 16 dots. That art isn't a
-    // uniform 16-spoke ring — it's 4 quadrant clusters on an outer ring, plus a tight 2x2
+    // uniform 16-spoke ring -- it's 4 quadrant clusters on an outer ring, plus a tight 2x2
     // cluster of the 4 locked-out dots (T00-T03) dead-center, separate from the functional ring
     // entirely. Quadrant membership is NOT consecutive index pairs (T08,T09 are not the same
-    // quadrant) — it's the ThrusterTestUI's own grouping: T04-T07 is one "approach" thruster per
+    // quadrant) -- it's the ThrusterTestUI's own grouping: T04-T07 is one "approach" thruster per
     // quadrant, T08-T11 one "brake-yaw" thruster per quadrant, T12-T15 one "brake-pitch"
     // thruster per quadrant, all four groups in the same quadrant order. Quadrant order/angles
     // are screen-relative (TL/TR/BR/BL), confirmed against the running game rather than assumed
@@ -56,7 +59,7 @@ public class ThrusterFiringDiagram : MonoBehaviour
     };
 
     // Large thrusters: sizes traced from dragon_ui_large_thruster_keyframes.svg. The ring sits
-    // INSET inside the dot (ring circle radius ~10.02 vs dot radius ~13.4 => ~0.75x) — it's
+    // INSET inside the dot (ring circle radius ~10.02 vs dot radius ~13.4 => ~0.75x) -- it's
     // meant to read as a bullseye (white dot -> black ring -> small white center), not a halo
     // around the outside of the dot.
     const float LargeDotToSmallDotRatio = 1.9f;
@@ -69,7 +72,7 @@ public class ThrusterFiringDiagram : MonoBehaviour
     static readonly float[] LargeOpacityKeyframes = { 0.50f, 0.75f, 1.00f, 1.00f, 0.84f, 0.68f, 0.50f };
 
     // Small thrusters. NOTE: the plume is sized relative to the diagram's ring radius, not the
-    // dot — dragon_ui_small_thruster_plume_full.svg's raw units (10.69x the dot's diameter)
+    // dot -- dragon_ui_small_thruster_plume_full.svg's raw units (10.69x the dot's diameter)
     // looked correct on paper but assumed the dot and plume SVGs were exported at directly
     // comparable scales. They weren't: at Stream mode's compact ~6px dot that ratio produced a
     // ~60px plume that swallowed the entire diagram. Sizing off the ring radius instead keeps
@@ -77,7 +80,7 @@ public class ThrusterFiringDiagram : MonoBehaviour
     // taller than wide) is still traced faithfully from the source art.
     const float PlumeHeightToRingRadius = 1.5f; // a bit bigger than the traced 0.55 so there's room for the round end to clear the dot
     const float PlumeAspect             = 69.16f / 141.72f; // width = height * this
-    const float PlumePivotYOffset       = 0.06f; // pushes the plume's rounded end outward past the dot instead of centering it under the dot -- negative pivot.y is valid in Unity, it just means the anchor sits outside the sprite's own bounds
+    const float PlumePivotYOffset       = 0.06f; // pushes the plume's rounded end outward past the dot instead of centering it under the dot -- fraction measured from the sprite's own bottom (rounded) edge
     const float SmallDotScale              = 0.80f; // overall size trim, mirrors LargeDotScale -- visual-balance knob, not traced
     const float SmallAttackRate            = 16f; // activation units/sec while firing (~125ms)
     const float SmallReleaseRate           = 12f; // activation units/sec while off (~165ms)
@@ -89,37 +92,43 @@ public class ThrusterFiringDiagram : MonoBehaviour
     private RCSModel _rcs;
     private float     _largeDotSize; // T04-T07 are all the same size; cached so UpdateLarge can resize the ring
 
-    private Image[] _dots;
-    private Image[] _rings;   // only T04-T07 populated
-    private Image[] _plumes;  // only T08-T15 populated
+    private VisualElement[] _dots;
+    private VisualElement[] _rings;   // only T04-T07 populated
+    private VisualElement[] _plumes;  // only T08-T15 populated
     private float[] _throttleCache;
     private float[] _largeProgress;    // 0..6, only T04-T07 meaningful
     private float[] _ringFadeIn;       // 0..1, only T04-T07 meaningful -- separate from _largeProgress so the ring's appearance always eases in over LargeRingFadeInRate regardless of how p got to the hold frame
     private float[] _smallActivation;  // 0..1, only T08-T15 meaningful
 
-    public void Initialize(RCSModel rcsModel, bool detailed, float diameterPx)
+    public void Initialize(VisualElement parent, RCSModel rcsModel, bool detailed, float diameterPx)
     {
         _rcs = rcsModel;
 
-        var rt = (RectTransform)transform;
-        UIFactory.SetAnchor(rt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-            new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(diameterPx, diameterPx));
+        var root = new VisualElement { name = "ThrusterDiagram" };
+        root.style.position = Position.Relative;
+        root.style.width  = diameterPx;
+        root.style.height = diameterPx;
+        parent.Add(root);
 
         var backplate = UIFactory.GetBackplateSprite();
         if (backplate != null)
         {
-            var backplateImg = UIFactory.CreateImage(transform, "Backplate", backplate, Color.white);
-            UIFactory.SetAnchor(backplateImg.rectTransform, Vector2.zero, Vector2.one, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
+            var backplateEl = new VisualElement { name = "Backplate" };
+            backplateEl.style.position = Position.Absolute;
+            backplateEl.style.width    = new Length(100, LengthUnit.Percent);
+            backplateEl.style.height   = new Length(100, LengthUnit.Percent);
+            backplateEl.style.backgroundImage = UIFactory.ToStyleBackground(backplate);
+            root.Add(backplateEl);
         }
 
-        BuildDots(detailed, diameterPx);
+        BuildDots(root, detailed, diameterPx);
     }
 
-    void BuildDots(bool detailed, float diameterPx)
+    void BuildDots(VisualElement root, bool detailed, float diameterPx)
     {
-        _dots            = new Image[ThrusterCount];
-        _rings           = new Image[ThrusterCount];
-        _plumes          = new Image[ThrusterCount];
+        _dots            = new VisualElement[ThrusterCount];
+        _rings           = new VisualElement[ThrusterCount];
+        _plumes          = new VisualElement[ThrusterCount];
         _throttleCache   = new float[ThrusterCount];
         _largeProgress   = new float[ThrusterCount];
         _ringFadeIn      = new float[ThrusterCount];
@@ -131,6 +140,9 @@ public class ThrusterFiringDiagram : MonoBehaviour
         float ringR      = diameterPx * 0.5f * OuterClusterFrac;
         float lockOffset = diameterPx * LockedClusterFrac;
         _largeDotSize = largeDotSize;
+
+        float centerX = diameterPx / 2f;
+        float centerY = diameterPx / 2f;
 
         for (int i = 0; i < ThrusterCount; i++)
         {
@@ -157,27 +169,44 @@ public class ThrusterFiringDiagram : MonoBehaviour
                 pos   = AnglePos(angle, ringR);
             }
 
-            var container = UIFactory.CreateContainer(transform, $"T{i:D2}");
-            UIFactory.SetAnchor(container, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0.5f, 0.5f), pos, Vector2.zero);
+            // AnglePos was written for Y-up screen space (positive Y = up); UI Toolkit's
+            // top/left grow downward, so Y is negated here to land each thruster in the same
+            // on-screen quadrant the original RectTransform layout put it in.
+            var container = new VisualElement { name = $"T{i:D2}" };
+            container.style.position = Position.Absolute;
+            container.style.left = centerX + pos.x;
+            container.style.top  = centerY - pos.y;
+            root.Add(container);
 
             bool isLarge = i >= LargeFirst && i <= LargeLast;
             float dotSize = isLarge ? largeDotSize : smallDotSize;
 
-            var dot = UIFactory.CreateImage(container, "Dot", UIFactory.GetDotSprite(), Color.white);
-            UIFactory.SetAnchor(dot.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(dotSize, dotSize));
+            var dot = new VisualElement { name = "Dot" };
+            dot.style.position = Position.Absolute;
+            dot.style.width  = dotSize;
+            dot.style.height = dotSize;
+            dot.style.left   = -dotSize / 2f;
+            dot.style.top    = -dotSize / 2f;
+            dot.style.backgroundImage = UIFactory.ToStyleBackground(UIFactory.GetDotSprite());
+            container.Add(dot);
             _dots[i] = dot;
 
             if (i < LockedOutUpTo)
             {
-                dot.color = new Color(1f, 1f, 1f, LockedOutOpacity);
+                dot.style.unityBackgroundImageTintColor = new Color(1f, 1f, 1f, LockedOutOpacity);
             }
             else if (isLarge)
             {
-                var ring = UIFactory.CreateImage(container, "Ring", UIFactory.GetThinRingSprite(), new Color(0f, 0f, 0f, 0f));
-                UIFactory.SetAnchor(ring.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                    new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(dotSize * LargeRingSizeMult, dotSize * LargeRingSizeMult));
+                var ring = new VisualElement { name = "Ring" };
+                ring.style.position = Position.Absolute;
+                float ringSize = dotSize * LargeRingSizeMult;
+                ring.style.width  = ringSize;
+                ring.style.height = ringSize;
+                ring.style.left   = -ringSize / 2f;
+                ring.style.top    = -ringSize / 2f;
+                ring.style.backgroundImage = UIFactory.ToStyleBackground(UIFactory.GetThinRingSprite());
+                ring.style.unityBackgroundImageTintColor = new Color(0f, 0f, 0f, 0f);
+                container.Add(ring);
                 _rings[i] = ring;
             }
             else // small, T08-T15: plume points tangentially, not at the center -- yaw (T08-T11)
@@ -190,11 +219,27 @@ public class ThrusterFiringDiagram : MonoBehaviour
                 bool  isPitch       = i >= 12; // T12-T15
                 float plumeRotation = isPitch ? angle : angle + 180f; // inverted from the tangent formula -- was pointing at the neighboring thruster instead of away from it
 
-                var plume = UIFactory.CreateImage(container, "Plume", UIFactory.GetPetalPlumeSprite(), new Color(1f, 1f, 1f, 0f));
-                UIFactory.SetAnchor(plume.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                    new Vector2(0.5f, PlumePivotYOffset), Vector2.zero, new Vector2(plumeWidth, plumeHeight));
-                plume.rectTransform.localEulerAngles = new Vector3(0f, 0f, plumeRotation);
-                plume.rectTransform.SetAsFirstSibling(); // render behind the dot
+                var plume = new VisualElement { name = "Plume" };
+                plume.style.position = Position.Absolute;
+                plume.style.width  = plumeWidth;
+                plume.style.height = plumeHeight;
+                // Pivot at the rounded end (bottom-center of the sprite, nudged up by
+                // PlumePivotYOffset) -- position the element so that point sits at the
+                // container's origin (the dot center), and move the rotation pivot
+                // (transform-origin) to the same point so it rotates like the old
+                // RectTransform's pivot did, instead of around its own center.
+                plume.style.left = -plumeWidth / 2f;
+                plume.style.top  = -plumeHeight * (1f - PlumePivotYOffset);
+                plume.style.transformOrigin = new TransformOrigin(
+                    new Length(50, LengthUnit.Percent),
+                    new Length(100f * (1f - PlumePivotYOffset), LengthUnit.Percent));
+                // USS rotation is clockwise-positive in UI Toolkit's Y-down space, opposite the
+                // RectTransform Z-euler (counter-clockwise-positive, Y-up) the original angle was
+                // computed for -- negate to preserve the original sweep direction.
+                plume.style.rotate = new Rotate(-plumeRotation);
+                plume.style.backgroundImage = UIFactory.ToStyleBackground(UIFactory.GetPetalPlumeSprite());
+                plume.style.unityBackgroundImageTintColor = new Color(1f, 1f, 1f, 0f);
+                container.Insert(0, plume); // render behind the dot
                 _plumes[i] = plume;
             }
         }
@@ -204,7 +249,7 @@ public class ThrusterFiringDiagram : MonoBehaviour
     {
         if (_dots == null) return;
 
-        // Sampled every frame, NOT gated behind _refreshInterval like the text-readout panels
+        // Sampled every frame, NOT gated behind a refresh interval like the text-readout panels
         // use -- GetThrottle() is just an array read (cheap), and a firing pulse shorter than
         // that ~100ms text-refresh cadence could get sampled late or missed entirely between
         // polls. The animation needs to track the physical firing state as tightly as the frame
@@ -251,16 +296,22 @@ public class ThrusterFiringDiagram : MonoBehaviour
         bool  ringActive = p >= 3f;
         _ringFadeIn[i] = Mathf.MoveTowards(_ringFadeIn[i], ringActive ? 1f : 0f, LargeRingFadeInRate * dt);
 
-        float ringGrowT     = Mathf.Clamp01(Mathf.InverseLerp(3f, 5f, p));
+        float ringGrowT        = Mathf.Clamp01(Mathf.InverseLerp(3f, 5f, p));
         float ringReleaseAlpha = p < 3f ? 0f : 1f - ringGrowT;
-        float ringAlpha     = Mathf.Min(_ringFadeIn[i], ringReleaseAlpha);
-        float ringSizeMult  = Mathf.Lerp(LargeRingSizeMult, LargeRingExpandedSizeMult, ringGrowT);
+        float ringAlpha        = Mathf.Min(_ringFadeIn[i], ringReleaseAlpha);
+        float ringSizeMult     = Mathf.Lerp(LargeRingSizeMult, LargeRingExpandedSizeMult, ringGrowT);
 
-        if (_dots[i]  != null) _dots[i].color  = new Color(1f, 1f, 1f, opacity);
+        if (_dots[i] != null)
+            _dots[i].style.unityBackgroundImageTintColor = new Color(1f, 1f, 1f, opacity);
+
         if (_rings[i] != null)
         {
-            _rings[i].color = new Color(0f, 0f, 0f, ringAlpha);
-            _rings[i].rectTransform.sizeDelta = Vector2.one * (_largeDotSize * ringSizeMult);
+            _rings[i].style.unityBackgroundImageTintColor = new Color(0f, 0f, 0f, ringAlpha);
+            float ringSize = _largeDotSize * ringSizeMult;
+            _rings[i].style.width  = ringSize;
+            _rings[i].style.height = ringSize;
+            _rings[i].style.left   = -ringSize / 2f;
+            _rings[i].style.top    = -ringSize / 2f;
         }
     }
 
@@ -272,8 +323,8 @@ public class ThrusterFiringDiagram : MonoBehaviour
         float a = Mathf.MoveTowards(_smallActivation[i], target, rate * dt);
         _smallActivation[i] = a;
 
-        if (_dots[i]   != null) _dots[i].color   = new Color(1f, 1f, 1f, Mathf.Lerp(SmallDotOpacityIdle, SmallDotOpacityActive, a));
-        if (_plumes[i] != null) _plumes[i].color = new Color(1f, 1f, 1f, Mathf.Lerp(SmallPlumeOpacityIdle, SmallPlumeOpacityActive, a));
+        if (_dots[i]   != null) _dots[i].style.unityBackgroundImageTintColor   = new Color(1f, 1f, 1f, Mathf.Lerp(SmallDotOpacityIdle, SmallDotOpacityActive, a));
+        if (_plumes[i] != null) _plumes[i].style.unityBackgroundImageTintColor = new Color(1f, 1f, 1f, Mathf.Lerp(SmallPlumeOpacityIdle, SmallPlumeOpacityActive, a));
     }
 
     /// Piecewise-linear sample of a 7-point keyframe table across progress domain [0,6].

@@ -1,15 +1,15 @@
 using UnityEngine;
-using UnityEngine.UI;
+using UnityEngine.UIElements;
 
 /// <summary>
-/// Shared helpers for building the Canvas-based HUD (DockingUIManager and its panels)
-/// procedurally in code. Centralizes the "new GameObject -> RectTransform -> component ->
-/// assign font" boilerplate so panel scripts don't repeat it — and can't forget the font
-/// assignment, which silently renders nothing rather than erroring.
+/// Procedural sprite generation shared by the HUD's hand-drawn widgets (currently just
+/// ThrusterFiringDiagram). These sprites aren't reproducible from a formula-free asset -- dots/
+/// rings are baked once and cached, the petal plume traces the Dragon-UI art's own bezier
+/// silhouette, and the backplate is loaded from Resources. Consumed as VisualElement background
+/// images via ToStyleBackground.
 /// </summary>
 public static class UIFactory
 {
-    private static Font   _font;
     private static Sprite _dotSprite;
     private static Sprite _ringSprite;
     private static Sprite _thinRingSprite;
@@ -17,87 +17,13 @@ public static class UIFactory
     private static Sprite _backplateSprite;
     private static bool   _backplateLoadAttempted;
 
-    public static Font DefaultFont =>
-        _font != null ? _font : (_font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"));
-
-    // ── layout ───────────────────────────────────────────────────────────────
-
-    /// Pins a RectTransform's anchors/pivot/position/size in one call — the four
-    /// values you'd otherwise set individually on every new element.
-    public static void SetAnchor(RectTransform rt, Vector2 anchorMin, Vector2 anchorMax,
-        Vector2 pivot, Vector2 anchoredPosition, Vector2 sizeDelta)
-    {
-        rt.anchorMin        = anchorMin;
-        rt.anchorMax        = anchorMax;
-        rt.pivot             = pivot;
-        rt.anchoredPosition  = anchoredPosition;
-        rt.sizeDelta         = sizeDelta;
-    }
-
-    /// Bare RectTransform, no Graphic — for grouping/positioning children only.
-    public static RectTransform CreateContainer(Transform parent, string name)
-    {
-        var go = new GameObject(name, typeof(RectTransform));
-        go.transform.SetParent(parent, false);
-        return go.GetComponent<RectTransform>();
-    }
-
-    // ── widgets ──────────────────────────────────────────────────────────────
-
-    public static RectTransform CreatePanel(Transform parent, string name, Color color)
-    {
-        var go = new GameObject(name, typeof(RectTransform), typeof(Image));
-        go.transform.SetParent(parent, false);
-        go.GetComponent<Image>().color = color;
-        return go.GetComponent<RectTransform>();
-    }
-
-    public static Text CreateText(Transform parent, string name, string content, int fontSize,
-        Color color, TextAnchor anchor = TextAnchor.MiddleLeft, FontStyle style = FontStyle.Bold)
-    {
-        var go = new GameObject(name, typeof(RectTransform), typeof(Text));
-        go.transform.SetParent(parent, false);
-        var txt = go.GetComponent<Text>();
-        txt.font      = DefaultFont;
-        txt.text      = content;
-        txt.fontSize  = fontSize;
-        txt.fontStyle = style;
-        txt.color     = color;
-        txt.alignment = anchor;
-        txt.horizontalOverflow = HorizontalWrapMode.Overflow;
-        txt.verticalOverflow   = VerticalWrapMode.Overflow;
-        return txt;
-    }
-
-    public static Button CreateButton(Transform parent, string name, string label,
-        Color bgColor, Color textColor, out Text buttonText)
-    {
-        var go = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
-        go.transform.SetParent(parent, false);
-        go.GetComponent<Image>().color = bgColor;
-
-        buttonText = CreateText(go.transform, "Label", label, 13, textColor, TextAnchor.MiddleCenter);
-        var txtRt = buttonText.GetComponent<RectTransform>();
-        SetAnchor(txtRt, Vector2.zero, Vector2.one, new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
-
-        return go.GetComponent<Button>();
-    }
-
-    /// Image using one of the procedural sprites below (or any sprite); color tints/dims it.
-    public static Image CreateImage(Transform parent, string name, Sprite sprite, Color color)
-    {
-        var go = new GameObject(name, typeof(RectTransform), typeof(Image));
-        go.transform.SetParent(parent, false);
-        var img = go.GetComponent<Image>();
-        img.sprite = sprite;
-        img.color  = color;
-        return img;
-    }
+    /// Wraps a sprite for use as a VisualElement's background-image.
+    public static StyleBackground ToStyleBackground(Sprite sprite) => new StyleBackground(sprite);
 
     // ── procedural sprites (built once, cached) ─────────────────────────────
 
     /// Solid filled circle, ~1.5px soft anti-aliased edge. Used for thruster indicator dots,
-    /// tinted/faded per-thruster via Image.color driven by throttle level.
+    /// tinted/faded per-thruster via unity-background-image-tint-color driven by throttle level.
     public static Sprite GetDotSprite()
     {
         if (_dotSprite != null) return _dotSprite;
@@ -126,8 +52,8 @@ public static class UIFactory
     }
 
     /// Annulus (outer radius ~1.0, inner ~0.72 of the texture half-size), soft AA on both edges.
-    /// Used as a gauge's static background track, and — via a second Image with
-    /// type=Filled/fillMethod=Radial360 — as the animated angle-sweep indicator.
+    /// Used as a gauge's static background track, and -- via a second Image with
+    /// type=Filled/fillMethod=Radial360 -- as the animated angle-sweep indicator.
     public static Sprite GetRingSprite()
     {
         if (_ringSprite != null) return _ringSprite;
@@ -158,7 +84,7 @@ public static class UIFactory
         return _ringSprite;
     }
 
-    /// Thin circular stroke (not the thick annulus GetRingSprite draws) — used as the halo
+    /// Thin circular stroke (not the thick annulus GetRingSprite draws) -- used as the halo
     /// outline that appears around a thruster dot while it's firing.
     public static Sprite GetThinRingSprite()
     {
@@ -267,7 +193,7 @@ public static class UIFactory
         return samplesDescendingY[n - 1].x;
     }
 
-    /// Dragon-UI docking-port backplate — hand-drawn art (scalloped port ring + inner alignment
+    /// Dragon-UI docking-port backplate -- hand-drawn art (scalloped port ring + inner alignment
     /// ring), cropped from a Canva export and loaded from Resources rather than baked
     /// procedurally like the sprites above; its silhouette isn't reproducible with a formula.
     /// Returns null (logging once) if the asset is missing, so callers can fall back gracefully.

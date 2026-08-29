@@ -1,35 +1,49 @@
 using UnityEngine;
+using UnityEngine.UIElements;
 
 /// <summary>
-/// Right-edge Utility-mode panel: detailed thruster-firing ring (T00-T15 labeled) — the same
-/// ThrusterFiringDiagram used compact in StreamModeOverlay. Fixed size rather than a live
-/// screen-height percentage (matches the fixed-pixel-box convention every other HUD panel in
-/// this project already uses, e.g. DockingHUD sizes its box from content, not from screen %).
+/// Right-edge, always-visible panel: detailed thruster-firing ring (T00-T15 labeled).
+/// Vertically centered on the right edge -- no slide-out/tab, matching
+/// UtilityPositionalPanel's always-visible left-edge panel.
+///
+/// Centered via flexbox (an invisible full-screen "anchor" with justify-content/align-items)
+/// rather than computed pixel offsets: manual positioning proved unreliable here -- `right`
+/// alone didn't reliably combine with an explicit width for an absolutely positioned element
+/// in this project's Unity version, and a reactive GeometryChangedEvent measurement raced
+/// with the diagram's own deferred construction (ThrusterFiringDiagram populates DiagramHost
+/// after Content's structure is otherwise complete). Flexbox centering sidesteps both -- it
+/// doesn't need to know Body's size, or when it settles, at all.
 /// </summary>
-[RequireComponent(typeof(RectTransform))]
 public class UtilityThrusterPanel : MonoBehaviour
 {
-    static readonly Color   PanelBg   = new Color(0f, 0f, 0f, 0.62f);
-    static readonly Vector2 PanelSize = new Vector2(260f, 420f); // ~half of a typical 900-1000px window
+    const float PanelWidth      = 280f; // wide enough that the 220px diagram gets breathing room inside the box's own 15px padding
+    const float DiagramDiameter = 220f;
+    const float EdgeGap         = 0f;
 
-    public void Initialize(RCSModel rcsModel)
+    public void Initialize(VisualElement parent, RCSModel rcsModel)
     {
-        var rt = (RectTransform)transform;
-        UIFactory.SetAnchor(rt, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-            new Vector2(-12f, 0f), PanelSize);
+        var anchor = new VisualElement { name = "ThrusterAnchor" };
+        anchor.style.position = Position.Absolute;
+        anchor.style.left = 0; anchor.style.right = 0; anchor.style.top = 0; anchor.style.bottom = 0;
+        anchor.style.justifyContent = Justify.Center; // vertical centering (main axis, column direction)
+        anchor.style.alignItems     = Align.FlexEnd;  // pin to the right edge (cross axis)
+        anchor.style.paddingRight   = EdgeGap;
+        parent.Add(anchor);
 
-        var slide = gameObject.AddComponent<SlideOutPanel>();
-        slide.Initialize(SlideEdge.Right, PanelSize, PanelBg);
+        var body = new VisualElement { name = "Body" };
+        body.AddToClassList("panel");
+        // Override .panel's `position: absolute` -- Body needs to be a normal-flow child of
+        // `anchor` for justify-content/align-items to actually center it; an absolutely
+        // positioned child is removed from flex layout entirely and ignores both.
+        body.style.position = Position.Relative;
+        body.style.width = PanelWidth;
+        anchor.Add(body);
 
-        var header = UIFactory.CreateText(slide.Content, "Header", "THRUSTERS", 13,
-            new Color(0.62f, 0.82f, 1f, 0.88f), TextAnchor.UpperCenter);
-        UIFactory.SetAnchor(header.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-            new Vector2(0.5f, 1f), new Vector2(0f, -10f), new Vector2(0f, 20f));
+        var template = Resources.Load<VisualTreeAsset>("UI/UtilityThrusterPanel");
+        var content  = template.Instantiate();
+        body.Add(content);
 
-        var diagramGo = new GameObject("Diagram", typeof(RectTransform));
-        diagramGo.transform.SetParent(slide.Content, false);
-        UIFactory.SetAnchor((RectTransform)diagramGo.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-            new Vector2(0.5f, 0.5f), new Vector2(0f, -14f), Vector2.zero);
-        diagramGo.AddComponent<ThrusterFiringDiagram>().Initialize(rcsModel, true, 220f);
+        var host = content.Q<VisualElement>("DiagramHost");
+        gameObject.AddComponent<ThrusterFiringDiagram>().Initialize(host, rcsModel, true, DiagramDiameter);
     }
 }

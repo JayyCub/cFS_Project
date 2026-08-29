@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="False">
+    <ui:VisualElement style="flex-grow: 1; background-color: rgba(0, 0, 0, 0.5); border-top-left-radius: 10px; border-bottom-left-radius: 10px; border-left-color: rgba(255, 255, 255, 0.5); border-right-color: rgba(255, 255, 255, 0.5); border-top-color: rgba(255, 255, 255, 0.5); border-bottom-color: rgba(255, 255, 255, 0.5); border-top-width: 2px; border-left-width: 2px; border-bottom-width: 2px; padding-top: 15px; padding-right: 15px; padding-bottom: 15px; padding-left: 15px;">
+        <ui:VisualElement name="PanelContent" style="align-items: center;">
+            <ui:Label name="Header" text="THRUSTERS" class="panel-header" style="-unity-font-style: bold; color: rgb(255, 255, 255); font-size: 15px;"/>
+            <ui:VisualElement name="DiagramHost" style="margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; width: auto; height: auto;"/>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

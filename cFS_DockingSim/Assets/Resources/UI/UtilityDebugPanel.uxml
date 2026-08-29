@@ -1,0 +1,44 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="False">
+    <ui:VisualElement style="flex-grow: 1; background-color: rgba(0, 0, 0, 0.5); border-top-left-radius: 10px; border-bottom-left-radius: 10px; border-left-color: rgba(255, 255, 255, 0.5); border-right-color: rgba(255, 255, 255, 0.5); border-top-color: rgba(255, 255, 255, 0.5); border-bottom-color: rgba(255, 255, 255, 0.5); border-top-width: 2px; border-left-width: 2px; border-bottom-width: 2px; padding-top: 15px; padding-right: 15px; padding-bottom: 15px; padding-left: 15px;">
+        <ui:VisualElement name="PanelContent" style="align-items: center;">
+            <ui:Label text="DEBUG" class="panel-header" style="-unity-text-align: upper-center; -unity-font-style: bold; font-size: 15px; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 2px; padding-right: 2px; padding-bottom: 2px; padding-left: 2px; color: rgb(255, 255, 255); width: 100%; height: 23px;"/>
+            <ui:VisualElement name="GridRow1" style="flex-direction: row; width: 100%; margin-top: 5px;">
+                <ui:VisualElement name="Suppress" class="row" style="flex-direction: column; width: 50%; height: 40px; margin-top: 0; margin-right: 5px; margin-bottom: 0; margin-left: 5px;">
+                    <ui:Label text="SUPPRESS [T]" name="SuppressLabel" class="row-label" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); font-size: 10px; height: 15px;"/>
+                    <ui:Label name="SuppressValue" text="--" class="row-value" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); height: 18px;"/>
+                </ui:VisualElement>
+                <ui:VisualElement name="Gnc" class="row" style="flex-direction: column; width: 50%; height: 40px; margin-top: 0; margin-right: 5px; margin-bottom: 0; margin-left: 5px;">
+                    <ui:Label text="GNC" name="GncLabel" class="row-label" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); font-size: 10px; height: 15px;"/>
+                    <ui:Label name="GncValue" text="---" class="row-value" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); height: 18px;"/>
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement name="GridRow2" style="flex-direction: row; width: 100%; margin-top: 5px;">
+                <ui:VisualElement name="Rdm" class="row" style="flex-direction: column; width: 50%; height: 40px; margin-top: 0; margin-right: 5px; margin-bottom: 0; margin-left: 5px;">
+                    <ui:Label text="RDM [H]" name="RdmLabel" class="row-label" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); font-size: 10px; height: 15px;"/>
+                    <ui:Label name="RdmValue" text="--" class="row-value" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); height: 18px;"/>
+                </ui:VisualElement>
+                <ui:VisualElement name="CmdF" class="row" style="flex-direction: column; width: 50%; height: 40px; margin-top: 0; margin-right: 5px; margin-bottom: 0; margin-left: 5px;">
+                    <ui:Label text="CMD F" name="CmdFLabel" class="row-label" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); font-size: 10px; height: 15px;"/>
+                    <ui:Label name="CmdFValue" text="0/0/0 N" class="row-value" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); height: 18px;"/>
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement name="GridRow3" style="flex-direction: row; width: 100%; margin-top: 5px;">
+                <ui:VisualElement name="CmdT" class="row" style="flex-direction: column; width: 50%; height: 40px; margin-top: 0; margin-right: 5px; margin-bottom: 0; margin-left: 5px;">
+                    <ui:Label text="CMD T" name="CmdTLabel" class="row-label" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); font-size: 10px; height: 15px;"/>
+                    <ui:Label name="CmdTValue" text="0/0/0 Nm" class="row-value" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); height: 18px;"/>
+                </ui:VisualElement>
+                <ui:VisualElement name="Duration" class="row" style="flex-direction: column; width: 50%; height: 40px; margin-top: 0; margin-right: 5px; margin-bottom: 0; margin-left: 5px;">
+                    <ui:Label text="DURATION" name="DurationLabel" class="row-label" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); font-size: 10px; height: 15px;"/>
+                    <ui:Label name="DurationValue" text="0.00 s" class="row-value" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); height: 18px;"/>
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement name="GridRow4" style="flex-direction: row; width: 100%; margin-top: 5px;">
+                <ui:VisualElement name="Firing" class="row" style="flex-direction: column; width: 50%; height: 40px; margin-top: 0; margin-right: 5px; margin-bottom: 0; margin-left: 5px;">
+                    <ui:Label text="FIRING" name="FiringLabel" class="row-label" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); font-size: 10px; height: 15px;"/>
+                    <ui:Label name="FiringValue" text="0/12" class="row-value" style="width: 100%; -unity-text-align: upper-center; margin-top: 0; margin-right: 0; margin-bottom: 0; margin-left: 0; padding-top: 0; padding-right: 0; padding-bottom: 0; padding-left: 0; color: rgb(255, 255, 255); height: 18px;"/>
+                </ui:VisualElement>
+                <ui:VisualElement style="width: 50%; margin-top: 0; margin-right: 5px; margin-bottom: 0; margin-left: 5px;"/>
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

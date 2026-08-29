@@ -1,0 +1,67 @@
+/*
+ * Shared design tokens for the docking HUD. This is the actual lever for "redesign and tweak
+ * easily" -- colors, spacing, fonts, corner rounding, and the slide-panel animation all live
+ * here and can be edited without touching C# or recompiling.
+ */
+
+.panel {
+    position: absolute;
+    background-color: rgba(0, 0, 0, 0.62);
+    border-radius: 8px;
+    padding: 10px;
+    flex-direction: column;
+}
+
+.slide-panel {
+    transition-property: translate;
+    transition-duration: 0.2s;
+    transition-timing-function: ease-out;
+}
+
+.panel-header {
+    color: rgba(158, 209, 255, 0.88);
+    font-size: 13px;
+    -unity-font-style: bold;
+    margin-bottom: 4px;
+}
+
+.section-gap {
+    margin-top: 14px;
+}
+
+.row {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    height: 20px;
+    /* Never compress below the declared height when the container comes up short --
+       overflow past the panel's edge instead of squishing every row to fit. */
+    flex-shrink: 0;
+}
+
+.row-label {
+    color: rgb(158, 158, 158);
+    font-size: 12px;
+    -unity-font-style: bold;
+}
+
+.row-value {
+    color: rgb(255, 255, 255);
+    font-size: 12px;
+    -unity-font-style: bold;
+}
+
+.row-value-vel {
+    color: rgb(255, 224, 140);
+}
+
+.tab-button {
+    background-color: rgba(26, 36, 51, 0.95);
+    color: rgb(255, 255, 255);
+    border-width: 0;
+    border-radius: 4px;
+    -unity-text-align: middle-center;
+    font-size: 14px;
+    padding: 0;
+}
+

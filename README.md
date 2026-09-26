@@ -48,15 +48,15 @@ Clohessy-Wiltshire differential gravity equations run continuously in Unity, pro
 │  │  Physics Simulation          │   │  UDP   │  │  sim_io (device I/O app)     │ │
 │  │  6-DOF dynamics              │ SIM_STATE  │  │  only app that owns sockets  │ │
 │  │  Clohessy-Wiltshire drift    │───────────>│  │  validates SimLink frames    │ │
-│  │  16-thruster RCS model       │ port 5005 │  └──────┬───────────────▲───────┘ │
-│  │  Docking corridor / detector │   │        │     SIM_STATE (SB)  WRENCH_CMD (SB)│
-│  │  UdpTelemetrySender =        │   │        │  ┌──────▼───────────────┴───────┐ │
-│  │    lock-step master          │   │        │  │  gnc_app (custom C app)      │ │
-│  └──────────────────────────────┘   │        │  │  runs once per SIM_STATE     │ │
-│  ┌──────────────────────────────┐   │        │  │  SelectPhase()               │ │
-│  │  UdpCommandReceiver          │<───────────│  │  ComputeControl()            │ │
-│  │  applies wrench in the same  │ WRENCH_CMD │  └──────────────────────────────┘ │
-│  │  physics step (lock-step)    │ port 5006 │  SCH_LAB: 1 Hz HK requests only    │
+│  │  Docking corridor / detector │ port 5005 │  └──────┬───────────────▲───────┘ │
+│  │  HandController (crew keys)  │   │        │   SIM_STATE (SB)  THRUSTER_CMD (SB)│
+│  │  UdpTelemetrySender =        │   │        │  ┌──────▼───────┐ ┌─────┴────────┐ │
+│  │    lock-step master          │   │        │  │  gnc_app     │ │  rcs         │ │
+│  └──────────────────────────────┘   │        │  │  phases,     │─▶ NNLS alloc + │ │
+│  ┌──────────────────────────────┐   │        │  │  control law │ │ PWM (valve   │ │
+│  │  UdpCommandReceiver →        │<───────────│  │  → impulse   │ │ on-times)    │ │
+│  │  RCSModel: 16 valves, full   │THRUSTER_CMD│  └──────────────┘ └──────────────┘ │
+│  │  thrust for each on-time     │ port 5006 │  SCH_LAB: 1 Hz HK requests only    │
 │  └──────────────────────────────┘   │        │                                   │
 └─────────────────────────────────────┘        └───────────────────────────────────┘
                                                                ^
@@ -66,7 +66,7 @@ Clohessy-Wiltshire differential gravity equations run continuously in Unity, pro
                                                     python3 gnc_cmd.py go/hold/abort
 ```
 
-The cFS→Unity command packet carries a body-frame wrench `[Fx, Fy, Fz, Tx, Ty, Tz]` plus a burn duration and the current GNC phase — not a thruster bitmask. Unity's `ThrusterAllocator` solves a pseudo-inverse allocation to map the wrench onto the 16 physical thrusters, exactly as a real spacecraft's control allocator would.
+Flight software makes every thruster decision. `gnc_app` computes the impulse it wants each cycle. The cFS `rcs` app allocates that impulse across the 16 thrusters from its own thruster table, using non-negative least squares, and converts it into per-valve on-times, honoring the minimum impulse bit and the per-cycle maximum. The cFS→Unity packet is just those valve on-times: Unity opens each valve at full Draco thrust and closes it on time. Keyboard piloting goes through cFS too, as simulated crew hand controllers that GNC flies in a MANUAL phase.
 
 ---
 
@@ -74,7 +74,7 @@ The cFS→Unity command packet carries a body-frame wrench `[Fx, Fy, Fz, Tx, Ty,
 
 ### GNC Application (cFS / C)
 
-`gnc_app` is a standard cFS application written in C that runs inside NASA's Core Flight Executive (cFE). It owns no sockets: it runs one guidance cycle for every `SIM_STATE` message that the `sim_io` app publishes on the Software Bus. That is 5 Hz of simulation time, in lock-step with Unity. It publishes its command back as a `WRENCH_CMD` Software Bus message.
+`gnc_app` is a standard cFS application written in C that runs inside NASA's Core Flight Executive (cFE). It owns no sockets: it runs one guidance cycle for every `SIM_STATE` message that the `sim_io` app publishes on the Software Bus. That is 5 Hz of simulation time, in lock-step with Unity. Its output is an impulse request on the Software Bus, which the `rcs` app turns into valve on-times (`THRUSTER_CMD`).
 
 **Phase state machine** (modeled on Dragon RPOD):
 
@@ -90,15 +90,15 @@ A hysteresis pair on lateral offset prevents rapid phase toggling. Every transit
 
 **Autonomous hold points and tiered approach speed:** two range thresholds (`HoldPoint1_m` / `HoldPoint2_m`, defaults 20 m / 3 m) automatically transition APPROACH → HOLD, modeling Dragon's manual GO/NO-GO waypoints — each fires once per approach and needs an explicit `GO` to continue. Before the outer hold point fires, the axial closure speed is capped by `MaxCloseSpeed` (0.3 m/s); afterward it's capped by the tighter `MaxCloseSpeed_Inner` (0.1 m/s) for the rest of the approach, mirroring the outer/inner closing-rate profile visible on real Dragon docking telemetry.
 
-**Proportional timed-burn control law:**
+**Impulse-request control law, allocated by an RCS manager app:**
 
-Rather than a simple on/off thruster command, the GNC computes the exact burn duration needed to achieve a target velocity correction each cycle:
+Each cycle GNC computes the velocity and rate change it wants and turns it into impulse using its model of the vehicle's mass properties:
 
 ```
-duration = Δv_needed / thruster_accel     (thruster_accel = F/m = 400 N / 4500 kg ≈ 0.089 m/s²)
+P = m·Δv  (N·s)          L = I·Δω  (N·m·s, per-axis inertia)
 ```
 
-`GNC_APP_ComputeControl()` outputs a body-frame wrench `[Fx, Fy, Fz, Tx, Ty, Tz]` and one shared duration per cycle; Unity's control allocator maps that wrench onto the physical thrusters and fires each for exactly `duration` seconds, then auto-cuts. This removes the limit-cycling oscillation that a bang-bang controller produces.
+It publishes that request. The `rcs` app works out which thrusters to fire and for how long: non-negative least squares over the thruster table, a 20 ms minimum impulse bit, and a 0.19 s per-cycle maximum with direction-preserving scaling when saturated. That's the same split real spacecraft flight software uses between guidance/control and actuator management. See [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) and [Docs/RCS_THRUSTER_REFERENCE.md](Docs/RCS_THRUSTER_REFERENCE.md).
 
 **Safety features:**
 
@@ -114,7 +114,7 @@ See [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) for the full control-law chan
 | File | Purpose |
 |------|---------|
 | `cFS/apps/gnc_app/fsw/src/gnc_app.c` | Main task, Init, ProcessSimState, SendHk, SelectPhase, ComputeControl, PublishCommand |
-| `cFS/apps/sim_io/fsw/src/sim_io*.c` | Device I/O app: SimLink UDP rx child task → `SIM_STATE` on SB; `WRENCH_CMD` from SB → UDP |
+| `cFS/apps/sim_io/fsw/src/sim_io*.c` | Device I/O app: SimLink UDP rx child task → `SIM_STATE` on SB; `THRUSTER_CMD` from SB → UDP |
 | `cFS/apps/sim_io/fsw/inc/simlink_icd.h` | SimLink wire format (mirrors `SimLinkProtocol.cs`) — see [Docs/SIMLINK_ICD.md](Docs/SIMLINK_ICD.md) |
 | `cFS/apps/gnc_app/fsw/src/gnc_app.h` | All type definitions, constants, `GNC_APP_Data_t` |
 | `cFS/apps/gnc_app/fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` struct (24 gain/physical-constant fields) |
@@ -136,11 +136,11 @@ Unity 6 runs the physics and renders the scene. It applies forces and integrates
 
 `RCSModel.cs` defines 16 physical thrusters (T00–T15) as body-frame position + direction vectors (see [Docs/RCS_THRUSTER_REFERENCE.md](Docs/RCS_THRUSTER_REFERENCE.md) for the full per-thruster table). T00–T03 are orbital retrograde thrusters, unused for docking; T04–T15 handle all approach, braking, and attitude maneuvers, each producing a coupled force **and** torque via `r × F` — a real thruster never produces "pure" translation or "pure" rotation.
 
-`ThrusterAllocator.cs` builds a 6×N effectiveness matrix at startup and computes its pseudo-inverse once (Gauss-Jordan). `RCSModel.SetWrenchCommand(Vector3 force, Vector3 torque, float duration)` — the cFS integration hook — runs that pseudo-inverse to map a desired 6-DOF wrench onto individual thruster on/off states (Draco thrusters are binary: full thrust or off). Unity auto-cuts each thruster at `burnEndTime`, so cFS never sends a stop packet.
+`RCSModel.SetThrusterOnTimes()` is the whole cFS interface. Each valve opens at the start of the GNC cycle, fires at full rated thrust (Draco thrusters don't throttle) and closes after its commanded on-time, resolved within a physics step so the delivered impulse is exact. Allocation happens in the cFS `rcs` app, using its own copy of this geometry (`rcs_thr_tbl.c`). RCSModel's **"Log cFS thruster table"** context-menu item regenerates that table after thrusters are moved.
 
 **Telemetry and commands (SimLink v2, lock-step):**
 
-`UdpTelemetrySender.cs` is the lock-step master. Every GNC cycle (0.2 s of *simulation* time) it sends a `SIM_STATE` frame to cFS, then holds that physics step until the `WRENCH_CMD` answering it arrives. `UdpCommandReceiver.cs` applies that command in the same step. Flight software therefore runs on simulation time: runs are repeatable, and a slow frame or a paused editor never desynchronizes the two sides. If cFS doesn't answer within 500 ms, Unity drops to free-running and re-engages automatically once cFS catches up.
+`UdpTelemetrySender.cs` is the lock-step master. Every GNC cycle (0.2 s of *simulation* time) it sends a `SIM_STATE` frame to cFS, then holds that physics step until the `THRUSTER_CMD` answering it arrives. `UdpCommandReceiver.cs` applies that command in the same step. Flight software therefore runs on simulation time: runs are repeatable, and a slow frame or a paused editor never desynchronizes the two sides. If cFS doesn't answer within 500 ms, Unity drops to free-running and re-engages automatically once cFS catches up.
 
 Frames carry a sync word, version, sequence number, sim time and CRC-16. Corrupt or mismatched frames are dropped and counted, never applied. The full byte layout is in [Docs/SIMLINK_ICD.md](Docs/SIMLINK_ICD.md).
 
@@ -249,7 +249,9 @@ cFS_Project/
 │   └── ATTITUDE_AUTOPILOT_GUIDE.md   ← retrospective learning-guide for the attitude PD implementation
 ├── cFS/                              ← NASA cFS (git submodule)
 │   ├── apps/
-│   │   └── gnc_app/                  ← custom GNC flight software application
+│   │   ├── gnc_app/                  ← custom GNC flight software application
+│   │   ├── rcs/                      ← RCS manager: thruster allocation + PWM
+│   │   └── sim_io/                   ← device I/O app: the only Unity socket owner
 │   │       └── fsw/
 │   │           ├── src/              ← gnc_app.c, gnc_app.h (no sockets — SB only)
 │   │           ├── inc/              ← gnc_app_tbl.h, gnc_app_msgids.h
@@ -260,8 +262,8 @@ cFS_Project/
 └── cFS_DockingSim/                   ← Unity 6 project
     └── Assets/
         ├── VehicleState.cs           ← Rigidbody wrapper; auto-computed inertia tensor
-        ├── RCSModel.cs               ← 16-thruster geometry + wrench command hook
-        ├── ThrusterAllocator.cs      ← pseudo-inverse control allocator (wrench → thrusters)
+        ├── RCSModel.cs               ← 16 thruster valves (opens each for its cFS on-time)
+        ├── HandController.cs         ← crew hand controllers (keyboard) → cFS MANUAL flight
         ├── ThrusterPlumes.cs         ← particle/glow exhaust effects per thruster
         ├── ClohessyWiltshire.cs      ← orbital differential gravity
         ├── RelativeNav.cs            ← approach state + per-axis attitude error
@@ -273,7 +275,7 @@ cFS_Project/
         ├── ScenarioReset.cs          ← Backspace reset
         ├── TelemetryLogger.cs        ← 10 Hz CSV log to project root
         ├── UdpTelemetrySender.cs     ← 10 Hz telemetry to cFS (port 5005)
-        └── UdpCommandReceiver.cs     ← wrench commands from cFS (port 5006)
+        └── UdpCommandReceiver.cs     ← valve on-time commands from cFS (port 5006)
 ```
 
 See [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) for the complete source file map with descriptions.

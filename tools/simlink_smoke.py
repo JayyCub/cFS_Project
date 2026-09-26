@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """
-SimLink smoke test — stands in for Unity to verify the cFS side of the lock-step link.
+SimLink smoke test — stands in for Unity to verify the cFS side end to end:
+SIM_IO (framing, lock-step) -> GNC (phases, control law) -> RCS (allocation, PWM) -> SIM_IO.
 
-Sends SIM_STATE frames (Seq 1..N) to SIM_IO exactly the way UdpTelemetrySender.cs does,
-and checks each one is answered by a CRC-valid WRENCH_CMD echoing the same Seq. Also
-sends one corrupt frame and checks cFS does NOT answer it.
+Sends SIM_STATE frames (Seq 1..N) exactly the way UdpTelemetrySender.cs does and checks
+each is answered by a CRC-valid THRUSTER_CMD echoing the same Seq. Scenario:
 
-Usage (cFS must be running, with SIM_IO's DestHost resolving to this machine):
-    python3 tools/simlink_smoke.py [--cycles 25] [--host 127.0.0.1]
+  1. IDLE (guidance inhibited at boot)       -> all valves closed
+  2. crew THC +Z (hand controller)           -> GNC MANUAL, approach group T04-T07 firing
+  3. sticks released, still MANUAL           -> rate hold only (no translation)
+  4. ground GO, 0.2 m lateral offset         -> GNC CORRECT, lateral + braking pulses
+  5. ground ABORT                            -> IDLE, all valves closed
+  6. corrupt frame                           -> dropped, not answered
+
+Usage (cFS running, SIM_IO DestHost resolving to this machine, CI_LAB on --ci-port):
+    python3 tools/simlink_smoke.py [--host 127.0.0.1]
 
 Wire format: Docs/SIMLINK_ICD.md (mirrors simlink_icd.h / SimLinkProtocol.cs).
 """
@@ -18,16 +25,21 @@ import sys
 import time
 
 SYNC = 0x324B4C53
-VERSION = 2
+VERSION = 3
 TYPE_SIM_STATE = 1
-TYPE_WRENCH_CMD = 2
+TYPE_THRUSTER_CMD = 3
+N_THR = 16
 
-HDR = struct.Struct("<IHHIId")        # 24 B
-STATE = struct.Struct("<5f3f3f3fI3f2f")  # 80 B
-WRENCH = struct.Struct("<7fi")        # 32 B
-TRL = struct.Struct("<HH")            # 4 B
+HDR = struct.Struct("<IHHIId")                 # 24 B
+STATE = struct.Struct("<5f3f3f3fI3f2f3f3f")    # 104 B
+THR = struct.Struct(f"<Ii{N_THR}f")            # 72 B
+TRL = struct.Struct("<HH")                     # 4 B
+assert HDR.size == 24 and STATE.size == 104 and THR.size == 72
 
-assert HDR.size == 24 and STATE.size == 80 and WRENCH.size == 32
+PHASES = {0: "IDLE", 1: "CORRECT", 2: "APPROACH", 3: "DOCKED", 4: "HOLD", 5: "MANUAL"}
+
+GNC_CMD_MID = 0x1893
+GNC_GO, GNC_ABORT = 3, 4
 
 
 def crc16(data: bytes) -> int:
@@ -39,93 +51,166 @@ def crc16(data: bytes) -> int:
     return crc
 
 
-def sim_state_frame(seq: int, sim_time: float, rng: float) -> bytes:
+def sim_state_frame(seq, sim_time, rng=30.0, lat=(0.0, 0.0), closing=0.0, thc=(0, 0, 0), rhc=(0, 0, 0)):
     length = HDR.size + STATE.size + TRL.size
     body = HDR.pack(SYNC, VERSION, TYPE_SIM_STATE, seq, length, sim_time) + STATE.pack(
-        0.2,                 # CycleDt_s
-        rng, 0.05, 0.3, 1.0,  # Range, ClosingSpeed, LateralOffset, AttitudeError
-        0.0, 0.0, -rng,       # RelPos
-        0.0, 0.0, 0.05,       # RelVel
-        0.0, 0.0, 0.0,        # AngVel
-        1,                    # Flags: in corridor
-        0.5, -0.5, 0.2,       # Pitch/Yaw/Roll error
-        0.2, -0.2,            # LatOffset X/Y
+        0.2,                                   # CycleDt_s
+        rng, closing, (lat[0] ** 2 + lat[1] ** 2) ** 0.5, 0.0,
+        lat[0], lat[1], -rng,                  # RelPos
+        0.0, 0.0, closing,                     # RelVel
+        0.0, 0.0, 0.0,                         # AngVel
+        1,                                     # Flags: in corridor
+        0.0, 0.0, 0.0,                         # Pitch/Yaw/Roll error
+        lat[0], lat[1],                        # LatOffset X/Y
+        *thc, *rhc,
     )
     return body + TRL.pack(crc16(body), 0)
 
 
-def parse_wrench(data: bytes):
-    if len(data) != HDR.size + WRENCH.size + TRL.size:
+def parse_thruster_cmd(data):
+    if len(data) != HDR.size + THR.size + TRL.size:
         return None, f"length {len(data)}"
     sync, ver, typ, seq, length, sim_time = HDR.unpack_from(data, 0)
-    if sync != SYNC or ver != VERSION or typ != TYPE_WRENCH_CMD or length != len(data):
+    if sync != SYNC or ver != VERSION or typ != TYPE_THRUSTER_CMD or length != len(data):
         return None, f"header sync={sync:#x} ver={ver} type={typ} len={length}"
     crc, _ = TRL.unpack_from(data, len(data) - TRL.size)
     if crc16(data[: len(data) - TRL.size]) != crc:
         return None, "CRC"
-    fields = WRENCH.unpack_from(data, HDR.size)
-    return {"seq": seq, "sim_time": sim_time, "wrench": fields[:6], "dur": fields[6], "phase": fields[7]}, None
+    n, phase, *on = THR.unpack_from(data, HDR.size)
+    return {"seq": seq, "sim_time": sim_time, "phase": phase, "on": on, "n": n}, None
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="127.0.0.1", help="cFS host (SIM_IO listen address)")
-    ap.add_argument("--port", type=int, default=5005)
-    ap.add_argument("--listen", type=int, default=5006)
-    ap.add_argument("--cycles", type=int, default=25)
-    ap.add_argument("--timeout", type=float, default=1.0)
-    args = ap.parse_args()
+def ccsds_cmd(mid, fc):
+    return struct.pack(">HHHBB", mid, 0xC000, 0x0001, fc & 0x7F, 0)
 
-    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    rx.bind(("0.0.0.0", args.listen))
-    rx.settimeout(args.timeout)
-    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    failures = 0
-    rtts = []
-    for seq in range(1, args.cycles + 1):
-        sim_time = (seq - 1) * 0.2
+class Link:
+    def __init__(self, a):
+        self.a = a
+        self.rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.rx.bind(("0.0.0.0", a.listen))
+        self.tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.seq = 0
+        self.rtts = []
+        self.failures = 0
+
+    def fail(self, msg):
+        print("FAIL " + msg)
+        self.failures += 1
+
+    def cycle(self, **state):
+        self.seq += 1
+        sim_time = (self.seq - 1) * 0.2
         t0 = time.perf_counter()
-        tx.sendto(sim_state_frame(seq, sim_time, 30.0 - 0.01 * seq), (args.host, args.port))
+        self.tx.sendto(sim_state_frame(self.seq, sim_time, **state), (self.a.host, self.a.port))
+        self.rx.settimeout(self.a.timeout)
         try:
             while True:
-                data, _ = rx.recvfrom(512)
-                cmd, why = parse_wrench(data)
+                data, _ = self.rx.recvfrom(512)
+                cmd, why = parse_thruster_cmd(data)
                 if cmd is None:
-                    print(f"  Seq {seq}: bad WRENCH_CMD frame ({why})")
-                    failures += 1
+                    self.fail(f"Seq {self.seq}: bad THRUSTER_CMD ({why})")
                     continue
-                if cmd["seq"] < seq:
-                    continue  # late answer to an earlier cycle
+                if cmd["seq"] < self.seq:
+                    continue
                 break
         except socket.timeout:
-            print(f"FAIL Seq {seq}: no answer within {args.timeout}s")
-            failures += 1
-            continue
-        rtts.append((time.perf_counter() - t0) * 1000)
-        if cmd["seq"] != seq or abs(cmd["sim_time"] - sim_time) > 1e-9:
-            print(f"FAIL Seq {seq}: answered Seq {cmd['seq']} simTime {cmd['sim_time']}")
-            failures += 1
-        elif seq == 1 or seq == args.cycles:
-            print(f"  Seq {seq}: OK phase={cmd['phase']} dur={cmd['dur']:.3f} F/T={['%.0f' % v for v in cmd['wrench']]}")
+            self.fail(f"Seq {self.seq}: no answer within {self.a.timeout}s")
+            return None
+        self.rtts.append((time.perf_counter() - t0) * 1000)
+        if cmd["seq"] != self.seq or abs(cmd["sim_time"] - sim_time) > 1e-9 or cmd["n"] != N_THR:
+            self.fail(f"Seq {self.seq}: answered Seq {cmd['seq']} simTime {cmd['sim_time']} n {cmd['n']}")
+        return cmd
 
-    # Corrupt frame (flip one payload byte, keep old CRC) must be dropped, not answered.
-    bad = bytearray(sim_state_frame(args.cycles + 1, args.cycles * 0.2, 20.0))
+    def ground(self, fc):
+        self.tx.sendto(ccsds_cmd(GNC_CMD_MID, fc), (self.a.host, self.a.ci_port))
+        time.sleep(1.2)  # CI_LAB polls its uplink socket; let GNC see the command first
+
+
+def fired(cmd):
+    return [i for i, t in enumerate(cmd["on"]) if t > 0]
+
+
+def show(label, cmd):
+    f = fired(cmd)
+    ons = " ".join(f"T{i:02d}={cmd['on'][i]:.3f}" for i in f) or "all closed"
+    print(f"  {label:<34} phase={PHASES.get(cmd['phase'], cmd['phase']):<8} {ons}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=5005)
+    ap.add_argument("--listen", type=int, default=5006)
+    ap.add_argument("--ci-port", type=int, default=1234)
+    ap.add_argument("--timeout", type=float, default=1.0)
+    a = ap.parse_args()
+    L = Link(a)
+
+    # 1. IDLE
+    for _ in range(5):
+        c = L.cycle()
+    if c:
+        show("1 IDLE", c)
+        if c["phase"] != 0 or fired(c):
+            L.fail("expected IDLE with all valves closed")
+
+    # 2. Crew THC +Z (forward)
+    for _ in range(3):
+        c = L.cycle(thc=(0, 0, 1))
+    if c:
+        show("2 THC +Z (crew takeover)", c)
+        if c["phase"] != 5:
+            L.fail("expected MANUAL after hand-controller deflection")
+        if not fired(c) or any(i not in (4, 5, 6, 7) for i in fired(c)):
+            L.fail("expected only the approach group T04-T07 for pure +Z")
+        if c["on"][4] < 0.02 or c["on"][4] > 0.19:
+            L.fail(f"T04 on-time {c['on'][4]:.3f} outside [MinOnTime, MaxOnTime]")
+
+    # 3. Sticks released, zero rates -> nothing to do
+    for _ in range(3):
+        c = L.cycle()
+    if c:
+        show("3 sticks released (rate hold)", c)
+        if c["phase"] != 5 or fired(c):
+            L.fail("expected MANUAL holding with valves closed (vehicle at rest)")
+
+    # 4. GO with a lateral offset and some closing speed -> autopilot corrects
+    L.ground(GNC_GO)
+    for _ in range(3):
+        c = L.cycle(lat=(0.2, -0.2), closing=0.05)
+    if c:
+        show("4 GO, lat (+0.2,-0.2), closing 0.05", c)
+        if c["phase"] not in (1, 2):
+            L.fail("expected CORRECT/APPROACH after GO")
+        if not fired(c):
+            L.fail("expected corrective pulses")
+
+    # 5. ABORT -> IDLE, valves closed
+    L.ground(GNC_ABORT)
+    for _ in range(2):
+        c = L.cycle(lat=(0.2, -0.2), closing=0.05)
+    if c:
+        show("5 ABORT", c)
+        if c["phase"] != 0 or fired(c):
+            L.fail("expected IDLE with all valves closed after ABORT")
+
+    # 6. Corrupt frame must be dropped, not answered
+    bad = bytearray(sim_state_frame(L.seq + 1, L.seq * 0.2))
     bad[40] ^= 0xFF
-    tx.sendto(bytes(bad), (args.host, args.port))
-    rx.settimeout(0.5)
+    L.tx.sendto(bytes(bad), (a.host, a.port))
+    L.rx.settimeout(0.5)
     try:
-        data, _ = rx.recvfrom(512)
-        print(f"FAIL corrupt frame was answered ({len(data)} bytes)")
-        failures += 1
+        data, _ = L.rx.recvfrom(512)
+        L.fail(f"corrupt frame was answered ({len(data)} bytes)")
     except socket.timeout:
-        print("  corrupt frame: dropped (OK)")
+        print("  6 corrupt frame                     dropped (OK)")
 
-    if rtts:
-        rtts.sort()
-        print(f"round trip ms: median {rtts[len(rtts) // 2]:.2f}, max {rtts[-1]:.2f} over {len(rtts)} cycles")
-    print("PASS" if failures == 0 else f"FAILED ({failures})")
-    return 0 if failures == 0 else 1
+    if L.rtts:
+        r = sorted(L.rtts)
+        print(f"round trip ms: median {r[len(r) // 2]:.2f}, max {r[-1]:.2f} over {len(r)} cycles")
+    print("PASS" if L.failures == 0 else f"FAILED ({L.failures})")
+    return 0 if L.failures == 0 else 1
 
 
 if __name__ == "__main__":

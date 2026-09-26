@@ -5,7 +5,7 @@ using UnityEngine;
 
 /// <summary>
 /// SimLink lock-step master. Every GNC cycle (gncCycleSec of simulation time) it sends a
-/// SIM_STATE frame to cFS SIM_IO, then blocks this physics step until the WRENCH_CMD
+/// SIM_STATE frame to cFS SIM_IO, then blocks this physics step until the THRUSTER_CMD
 /// answering that frame comes back and is applied — so flight software runs on
 /// simulation time and every run with the same inputs is repeatable.
 ///
@@ -26,6 +26,8 @@ public class UdpTelemetrySender : MonoBehaviour
     public DockingDetector  detector;
     [Tooltip("Command side of the link. Found automatically if left empty.")]
     public UdpCommandReceiver commandReceiver;
+    [Tooltip("Crew hand controllers (keyboard). Found or added automatically if left empty.")]
+    public HandController handController;
 
     [Header("Network")]
     [Tooltip("IP address of the machine running cFS.")]
@@ -55,6 +57,8 @@ public class UdpTelemetrySender : MonoBehaviour
     {
         if (commandReceiver == null)
             commandReceiver = FindAnyObjectByType<UdpCommandReceiver>();
+        if (handController == null)
+            handController = FindAnyObjectByType<HandController>() ?? gameObject.AddComponent<HandController>();
 
         try
         {
@@ -87,6 +91,8 @@ public class UdpTelemetrySender : MonoBehaviour
     void RunCycleBoundary()
     {
         if (nav == null || chaser == null) return;
+
+        if (handController != null) handController.Sample();
 
         Seq++;
         byte[] frame = SimLinkProtocol.BuildSimStateFrame(Seq, SimTime, BuildState());
@@ -152,6 +158,8 @@ public class UdpTelemetrySender : MonoBehaviour
             RollError_deg     = nav.rollError,
             LatOffset_X       = nav.lateralOffsetX,
             LatOffset_Y       = nav.lateralOffsetY,
+            Thc               = handController != null ? handController.Translation : Vector3.zero,
+            Rhc               = handController != null ? handController.Rotation    : Vector3.zero,
         };
     }
 

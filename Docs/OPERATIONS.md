@@ -78,22 +78,16 @@ cd /build-native_std/exe/cpu1
 ./core-cpu1
 ```
 
-You should see cFS boot messages followed by app initialization events. Watch for these lines confirming `gnc_app` is healthy:
+You should see cFS boot messages followed by app initialization events. Watch for these lines confirming the three mission apps are healthy:
 
 ```
-GNC_APP initialized. Recv port 5005, Cmd port 5006. Guidance INHIBITED — send GO to start.
-GNC_APP UDP: listening on port 5005
-GNC_APP: command socket ready → 192.168.x.x:5006
+SIM_IO initialized: SimLink v3, rx port 5005, tx host.docker.internal:5006
+RCS initialized: NNLS allocation + PWM over table /cf/rcs_thr_tbl.tbl
+GNC_APP initialized (lock-step on SIM_STATE). Guidance INHIBITED — send GO to start.
+SIM_IO: listening for SimLink frames on port 5005
 ```
 
-cFS then prints a wakeup log line every second:
-
-```
-GNC #1 | waiting for Unity telemetry...
-GNC #2 | waiting for Unity telemetry...
-```
-
-This is normal — guidance is inhibited and Unity is not playing yet. **Leave cFS running and move to Step 4.**
+Nothing else happens until Unity is playing. GNC is lock-stepped to the simulation, so with no Unity frames it simply waits. **Leave cFS running and move to Step 4.**
 
 ---
 
@@ -101,13 +95,13 @@ This is normal — guidance is inhibited and Unity is not playing yet. **Leave c
 
 Open `cFS_DockingSim/` in the Unity Editor and press **Play** on **Scene2**.
 
-Within 1–2 seconds cFS should start receiving telemetry. The wakeup log changes from "waiting for Unity telemetry" to:
+Within a cycle or two the Unity console shows `[UdpTelemetrySender] cFS answering — lock-step ENGAGED`, and cFS logs one line per GNC cycle (0.2 s of sim time):
 
 ```
-GNC #3 [IDLE] | Rng=15.23 Spd=0.000 Lat=2.41 | P=0.0 Y=0.0 R=0.0 | Cor=0 Dkd=0 | F=(0,0,0) T=(0,0,0) Dur=0.000s
+GNC #3 [IDLE] Rng=15.23 Spd=0.000 Lat=2.410 PYR=0.0/0.0/0.0 W=0.000/0.000/0.000 C0D0 P=0/0/0 L=0/0/0
 ```
 
-The phase shows `[IDLE]` because guidance is pre-latched. No thrusters fire yet. The vehicle drifts only under Clohessy-Wiltshire differential gravity.
+`P` and `L` are the linear and angular impulse GNC requested from the RCS app. The phase shows `[IDLE]` because guidance is pre-latched, so no thrusters fire yet. The vehicle drifts only under Clohessy-Wiltshire differential gravity.
 
 ---
 
@@ -190,9 +184,9 @@ The cFS EVS log (printed to the terminal running `./core-cpu1`) is the primary d
 | Event | EID | Meaning |
 |-------|-----|---------|
 | `GNC_APP initialized...` | 1 | App started OK. Guidance is pre-latched. |
-| `GNC_APP UDP: listening on port 5005` | 5 | Recv socket bound. Packets can now arrive from Unity. |
-| `GNC_APP: command socket ready` | 9 | cFS can send commands to Unity. |
-| `GNC #N [PHASE] \| Rng=... Cmd=0x... Dur=...` | 2 | 1 Hz wakeup log. Shows phase, nav state, and what was commanded. |
+| `SIM_IO: listening for SimLink frames on port 5005` | SIM_IO 5 | Recv socket bound. Frames can now arrive from Unity. |
+| `RCS initialized: ...` | RCS 1 | Thruster table loaded; allocation ready. |
+| `GNC #N [PHASE] Rng=... P=... L=...` | 2 | One per lock-step cycle. Phase, nav state, and the impulse requested from RCS. |
 | `GNC mode: X → Y` | 11 | Phase transition. Includes lateral offset and range at the moment of transition. |
 | `GNC_APP: NOOP` | 12 | NOOP received and accepted. |
 | `GNC_APP: counters reset` | 13 | RESET_COUNTERS accepted. |
@@ -204,42 +198,42 @@ The cFS EVS log (printed to the terminal running `./core-cpu1`) is the primary d
 | `GNC_APP: parameter table updated` | 19 | An uplinked table image was activated — new gains are live. |
 | `GNC_APP: HOLD POINT 1 — braking to ...` | 21 | Autonomous outer hold point (20 m default) reached during APPROACH. |
 | `GNC_APP: HOLD POINT 2 — braking to ...` | 22 | Autonomous inner hold point (3 m default) reached during APPROACH. |
-| `GNC_APP UDP: recv error RC=...` | 6 | Recv task got a fatal socket error and exited. Restart cFS. |
-| `GNC_APP UDP: wrong packet size` | 6 | Unity sent a packet with the wrong byte count (packet format mismatch). |
+| `SIM_IO: rejected N-byte frame (bad ...)` | 6 | Unity and cFS disagree on the SimLink format — rebuild both from the same commit. |
+| `GNC_APP: CREW MANUAL TAKEOVER (hand controller)` | 29 | A hand-controller key was pressed; GNC is flying the sticks (MANUAL) until GO. |
 
 ---
 
 ## Keyboard Controls (Unity)
 
-Controls are active when cFS is **not** in control (before GO, or after ABORT).
+The flight keys are the **crew hand controllers**. They don't fire thrusters directly: every GNC cycle Unity sends the stick state to cFS, and pressing any of them hands control to the crew (GNC → **MANUAL**) from any undocked phase, even before GO. Translation keys are an acceleration command. Rotation keys are a rate command with **rate hold**: when you let go, flight software damps the rotation to zero. Send `GO` to hand control back to the autopilot. Manual flight requires cFS to be running.
 
 | Key | Action |
 |-----|--------|
-| W / S | Forward / Back (+Z / -Z) |
-| A / D | Left / Right (−X / +X) |
-| Space | Up (+Y) |
-| Ctrl | Down (−Y) |
-| R / F | Pitch up / down |
-| E / Q | Yaw right / left |
-| Z / X | Roll CW / CCW |
+| W / S | THC forward / back (+Z / −Z) |
+| A / D | THC left / right (−X / +X) |
+| Space | THC up (+Y) |
+| Ctrl | THC down (−Y) |
+| R / F | RHC pitch up / down |
+| E / Q | RHC yaw right / left |
+| Z / X | RHC roll CW / CCW |
 | T | Toggle force suppression (debug) |
-| H | Toggle Rate Damping |
+| H | Toggle legacy Unity rate damping (inactive while cFS is connected) |
 | Backspace | Reset scenario (zeroes velocities, returns to start position) |
 | 1 / 2 / 3 / 4 | Switch camera (nose/docking, ISS cam A/B, chase cam) |
 | Arrow keys | Articulate active camera |
 | Enter | Center camera |
-| `` ` `` (backtick) | Toggle single-thruster test mode |
-| F8 | Run automated thruster calibration diagnostic |
+| `` ` `` (backtick) | Toggle single-thruster test mode (bench test, bypasses cFS) |
+| F8 | Run the thruster hardware bench test (run with cFS stopped) |
 
 ---
 
 ## Troubleshooting
 
-### "Waiting for Unity telemetry" after pressing Play
+### Unity never logs "lock-step ENGAGED" after pressing Play
 
 1. Check that Unity is playing **Scene2** (not SampleScene).
 2. Check that port 5005 is not blocked — another cFS instance or process may hold the port. Run `docker rm -f cfs-dev` and restart.
-3. Look for `GNC_APP UDP: recv error RC=...` in the EVS log — this means the recv task exited. Restart cFS.
+3. Look for `SIM_IO: rejected ... frame` or `rx error` in the EVS log. A rejected frame means the Unity and cFS builds disagree on the SimLink version.
 4. Check that `UdpTelemetrySender.cs` has the correct destination IP (`127.0.0.1`) and port (`5005`) in the Unity Inspector.
 
 ### Commands not reaching cFS
@@ -251,13 +245,13 @@ Controls are active when cFS is **not** in control (before GO, or after ABORT).
 
 ### cFS → Unity commands not reaching Unity
 
-1. Check for `GNC_APP: command socket ready → ...` in the EVS log. If missing, DNS resolution of `host.docker.internal` failed — restart Docker Desktop.
+1. Check the `SIM_IO initialized ... tx host.docker.internal:5006` event. A `cannot resolve` error means DNS resolution of `host.docker.internal` failed — restart Docker Desktop.
 2. Check that `UdpCommandReceiver.cs` is attached to a GameObject in the scene and has `rcsModel` assigned in the Inspector.
 3. Confirm port 5006 is open in the Unity script (`listenPort = 5006`).
 
 ### Vehicle oscillates / overshoots after GO
 
-The GNC gains (`AxialKp`, `LatKp`, etc.) and the physical parameters (`ThrusterForce`, `VehicleMass`) live in `GNC_ParamTbl_t` (`gnc_param_tbl.c`) and must match the Unity Inspector values. If `RCSModel.thrusterForce` or the Rigidbody mass has been changed in the Inspector, update the matching table fields and rebuild — or uplink a corrected table image to a running system without a restart.
+The GNC gains (`AxialKp`, `LatKp`, etc.) and mass properties (`VehicleMass`, `Inertia_kgm2`) live in `GNC_ParamTbl_t` (`gnc_param_tbl.c`). Thrust and thruster geometry live in the RCS table (`rcs_thr_tbl.c`). They are flight software's *model* of the vehicle. Small differences from the Unity scene are absorbed by the closed loop, but large ones (for example, after moving thrusters) should be fixed: regenerate the RCS table with RCSModel's "Log cFS thruster table" context menu and rebuild, or uplink a corrected table image to a running system.
 
 ### Rebuilding after a code change
 

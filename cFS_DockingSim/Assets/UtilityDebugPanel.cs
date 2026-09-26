@@ -31,7 +31,7 @@ public class UtilityDebugPanel : MonoBehaviour
     static readonly Color WarnColor      = new Color(1.00f, 0.35f, 0.30f, 1f);
     static readonly Color NeutralColor   = new Color(0.62f, 0.62f, 0.62f, 1f);
 
-    static readonly string[] GncPhaseNames = { "IDLE", "CORRECT", "APPROACH", "DOCKED", "HOLD" };
+    static readonly string[] GncPhaseNames = { "IDLE", "CORRECT", "APPROACH", "DOCKED", "HOLD", "MANUAL" };
 
     private RCSModel           _rcs;
     private UdpCommandReceiver _cfsReceiver;

@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 
 /// <summary>
-/// SimLink v2 — wire format between this simulation (the vehicle "hardware") and
+/// SimLink v3 — wire format between this simulation (the vehicle "hardware") and
 /// cFS's SIM_IO app. Mirrors cFS/apps/sim_io/fsw/inc/simlink_icd.h; see
 /// Docs/SIMLINK_ICD.md.
 ///
@@ -11,24 +11,29 @@ using UnityEngine;
 ///   Header:  u32 Sync 'SLK2' | u16 Version | u16 Type | u32 Seq | u32 Length | f64 SimTime_s
 ///   Trailer: u16 CRC-16/CCITT-FALSE over every preceding byte | u16 spare
 ///
-/// Lock-step: one SIM_STATE per GNC cycle with an incrementing Seq; the WRENCH_CMD
+/// Lock-step: one SIM_STATE per GNC cycle with an incrementing Seq; the THRUSTER_CMD
 /// answering it echoes the same Seq.
+///
+/// v3: cFS does thruster allocation + PWM, so the command is per-thruster valve
+/// on-times; SIM_STATE carries the crew hand-controller deflections.
 /// </summary>
 public static class SimLinkProtocol
 {
     public const uint   Sync    = 0x324B4C53; // 'S','L','K','2' on the wire
-    public const ushort Version = 2;
+    public const ushort Version = 3;
 
-    public const ushort TypeSimState  = 1; // Unity -> cFS
-    public const ushort TypeWrenchCmd = 2; // cFS -> Unity
+    public const ushort TypeSimState    = 1; // Unity -> cFS
+    public const ushort TypeThrusterCmd = 3; // cFS -> Unity (type 2 = v2 WRENCH_CMD, retired)
 
-    public const int HeaderBytes   = 24;
-    public const int TrailerBytes  = 4;
-    public const int SimStateBytes = 80;
-    public const int WrenchBytes   = 32;
+    public const int NumThrusters = 16;
 
-    public const int SimStateFrameBytes  = HeaderBytes + SimStateBytes + TrailerBytes; // 108
-    public const int WrenchCmdFrameBytes = HeaderBytes + WrenchBytes + TrailerBytes;   // 60
+    public const int HeaderBytes      = 24;
+    public const int TrailerBytes     = 4;
+    public const int SimStateBytes    = 104;
+    public const int ThrusterCmdBytes = 8 + 4 * NumThrusters; // 72
+
+    public const int SimStateFrameBytes    = HeaderBytes + SimStateBytes + TrailerBytes;    // 132
+    public const int ThrusterCmdFrameBytes = HeaderBytes + ThrusterCmdBytes + TrailerBytes; // 100
 
     public const uint FlagInCorridor = 0x1;
     public const uint FlagDocked     = 0x2;
@@ -44,17 +49,17 @@ public static class SimLinkProtocol
         public uint    Flags;
         public float   PitchError_deg, YawError_deg, RollError_deg;
         public float   LatOffset_X, LatOffset_Y;
+        public Vector3 Thc;      // crew translation hand controller, body X/Y/Z, -1..+1
+        public Vector3 Rhc;      // crew rotation hand controller (pitch/yaw/roll), -1..+1
     }
 
-    /// <summary>Decoded WRENCH_CMD frame.</summary>
-    public struct WrenchCmd
+    /// <summary>Decoded THRUSTER_CMD frame: valve on-times computed by the cFS RCS app.</summary>
+    public struct ThrusterCmd
     {
         public uint    Seq;
         public double  SimTime_s;
-        public Vector3 Force;    // body frame (N)
-        public Vector3 Torque;   // body frame (N·m)
-        public float   Duration_s;
         public int     GncPhase;
+        public float[] OnTime_s; // length NumThrusters; 0 = valve closed this cycle
     }
 
     public static byte[] BuildSimStateFrame(uint seq, double simTime, in SimState s)
@@ -76,35 +81,45 @@ public static class SimLinkProtocol
         off = PutF(buf, off, s.RollError_deg);
         off = PutF(buf, off, s.LatOffset_X);
         off = PutF(buf, off, s.LatOffset_Y);
+        off = PutV(buf, off, s.Thc);
+        off = PutV(buf, off, s.Rhc);
 
         WriteTrailer(buf, off);
         return buf;
     }
 
     /// <summary>
-    /// Validate and decode a WRENCH_CMD frame. Returns null (with a reason) on any
+    /// Validate and decode a THRUSTER_CMD frame. Returns null (with a reason) on any
     /// sync/version/type/length/CRC failure — a corrupt command is dropped, never applied.
     /// </summary>
-    public static WrenchCmd? TryParseWrenchCmd(byte[] buf, int len, out string reason)
+    public static ThrusterCmd? TryParseThrusterCmd(byte[] buf, int len, out string reason)
     {
         reason = null;
-        if (len != WrenchCmdFrameBytes)                            { reason = $"length {len}";   return null; }
+        if (len != ThrusterCmdFrameBytes)                          { reason = $"length {len}";   return null; }
         if (BitConverter.ToUInt32(buf, 0) != Sync)                 { reason = "sync word";       return null; }
         if (BitConverter.ToUInt16(buf, 4) != Version)              { reason = "version";         return null; }
-        if (BitConverter.ToUInt16(buf, 6) != TypeWrenchCmd)        { reason = "type";            return null; }
+        if (BitConverter.ToUInt16(buf, 6) != TypeThrusterCmd)      { reason = "type";            return null; }
         if (BitConverter.ToUInt32(buf, 12) != (uint)len)           { reason = "header length";   return null; }
         ushort crc = BitConverter.ToUInt16(buf, len - TrailerBytes);
         if (Crc16(buf, len - TrailerBytes) != crc)                 { reason = "CRC";             return null; }
 
         int p = HeaderBytes;
-        return new WrenchCmd
+        if (BitConverter.ToUInt32(buf, p) != NumThrusters)         { reason = "thruster count";  return null; }
+
+        var onTimes = new float[NumThrusters];
+        for (int i = 0; i < NumThrusters; i++)
         {
-            Seq        = BitConverter.ToUInt32(buf, 8),
-            SimTime_s  = BitConverter.ToDouble(buf, 16),
-            Force      = new Vector3(F(buf, p), F(buf, p + 4), F(buf, p + 8)),
-            Torque     = new Vector3(F(buf, p + 12), F(buf, p + 16), F(buf, p + 20)),
-            Duration_s = F(buf, p + 24),
-            GncPhase   = BitConverter.ToInt32(buf, p + 28),
+            float t = F(buf, p + 8 + 4 * i);
+            if (float.IsNaN(t) || float.IsInfinity(t) || t < 0f)   { reason = $"T{i:D2} on-time {t}"; return null; }
+            onTimes[i] = t;
+        }
+
+        return new ThrusterCmd
+        {
+            Seq       = BitConverter.ToUInt32(buf, 8),
+            SimTime_s = BitConverter.ToDouble(buf, 16),
+            GncPhase  = BitConverter.ToInt32(buf, p + 4),
+            OnTime_s  = onTimes,
         };
     }
 

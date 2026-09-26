@@ -11,18 +11,18 @@ The autopilot is split across two codebases that talk over UDP:
 ```
 Unity (Mac)                                  cFS (Docker)
 ───────────────────────────────────          ─────────────────────────────────
-RelativeNav.cs   → builds nav state          gnc_app.c    → SelectPhase()
-VehicleState.cs  → Rigidbody wrapper                      → ComputeControl()
-RCSModel.cs      → 16 physical thrusters     sim_io       → SimLink UDP ⇄ Software Bus
-ThrusterAllocator.cs → wrench → thrusters    gnc_app.h    → all types/constants
-ClohessyWiltshire.cs → orbital drift         gnc_app_tbl.h→ tunable gains
+RelativeNav.cs   → builds nav state          sim_io       → SimLink UDP ⇄ Software Bus
+VehicleState.cs  → Rigidbody wrapper         gnc_app.c    → SelectPhase(), ComputeControl()
+RCSModel.cs      → 16 thruster valves        rcs          → allocation + PWM (thruster table)
+HandController.cs→ crew sticks (keyboard)    gnc_app_tbl.h→ tunable gains, mass properties
+ClohessyWiltshire.cs → orbital drift         rcs_tbl.h    → thruster geometry, pulse limits
                       ←──────────────────────────────────
-                         SIM_STATE (port 5005, 5 Hz sim time, 108 B)
+                         SIM_STATE (port 5005, every 0.2 s sim time, 132 B)
                       ──────────────────────────────────→
-                         WRENCH_CMD (port 5006, answers each SIM_STATE — lock-step, 60 B)
+                         THRUSTER_CMD (port 5006, answers each SIM_STATE — lock-step, 100 B)
 ```
 
-**GNC runs at 1 Hz inside cFS. Unity runs physics at 50 Hz. `GNC_APP_ComputeControl()` outputs a body-frame wrench `[Fx,Fy,Fz,Tx,Ty,Tz]` plus one shared burn duration; Unity's `ThrusterAllocator` maps that wrench onto individual thrusters via a pseudo-inverse, and each fires for the exact duration cFS computed — cFS never sends a stop packet.**
+**GNC runs once per SIM_STATE (5 Hz of sim time), in lock-step with Unity's 50 Hz physics. `GNC_APP_ComputeControl()` outputs the impulse it wants this cycle: P = m·Δv and L = I·Δω, body frame. The cFS `rcs` app allocates that across the thrusters with NNLS over its thruster table and converts it to per-valve on-times, honoring the minimum impulse bit and the per-cycle maximum. Unity just opens each valve for its on-time at full thrust. See [SIMLINK_ICD.md](SIMLINK_ICD.md) and [RCS_THRUSTER_REFERENCE.md](RCS_THRUSTER_REFERENCE.md).**
 
 ---
 
@@ -33,7 +33,8 @@ ClohessyWiltshire.cs → orbital drift         gnc_app_tbl.h→ tunable gains
 | File | What it does | Edit when |
 |------|-------------|-----------|
 | `cFS/apps/gnc_app/fsw/src/gnc_app.c` | Phase state machine, control law, wakeup handler | Adding phases, changing guidance logic |
-| `cFS/apps/sim_io/` | Device I/O app — owns the Unity sockets, SimLink framing, lock-step `SIM_STATE`/`WRENCH_CMD` SB messages | Changing packet format or network topology (see `Docs/SIMLINK_ICD.md`) |
+| `cFS/apps/sim_io/` | Device I/O app — owns the Unity sockets, SimLink framing, lock-step `SIM_STATE`/`THRUSTER_CMD` SB messages | Changing packet format or network topology (see `Docs/SIMLINK_ICD.md`) |
+| `cFS/apps/rcs/` | RCS manager — NNLS thruster allocation + PWM (min impulse bit, per-cycle max, saturation scaling) from `rcs_thr_tbl.c` | Changing thruster geometry, thrust, pulse limits, or the allocation algorithm |
 | `cFS/apps/gnc_app/fsw/src/gnc_app.h` | All enums, structs, constants, function prototypes | Adding new state, message IDs, or event IDs |
 | `cFS/apps/gnc_app/fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` — 24 tunable gain/physical-constant fields | Adding new gains you want in the table |
 | `cFS/apps/gnc_app/fsw/tables/gnc_param_tbl.c` | Default values for the gain table | Changing defaults at compile time |
@@ -43,16 +44,16 @@ ClohessyWiltshire.cs → orbital drift         gnc_app_tbl.h→ tunable gains
 | File | What it does | Edit when |
 |------|-------------|-----------|
 | `cFS_DockingSim/Assets/RelativeNav.cs` | Computes range, closing speed, lateral offset, scalar + per-axis attitude error | Changing what navigation data is available |
-| `cFS_DockingSim/Assets/RCSModel.cs` | 16-thruster geometry (position + direction); `SetWrenchCommand()` is the cFS hook | Changing thruster layout or burn execution |
-| `cFS_DockingSim/Assets/ThrusterAllocator.cs` | Builds the 6×N effectiveness matrix and its pseudo-inverse; maps a wrench to per-thruster on/off | Changing the allocation algorithm or thruster count |
+| `cFS_DockingSim/Assets/RCSModel.cs` | Thruster valve hardware: `SetThrusterOnTimes()` opens each valve for its cFS on-time at full thrust; "Log cFS thruster table" context menu regenerates `rcs_thr_tbl.c` | Changing thruster layout or thrust |
+| `cFS_DockingSim/Assets/HandController.cs` | Crew hand controllers (keyboard) → `Thc`/`Rhc` in every SIM_STATE; GNC flies them in MANUAL | Changing manual-flight inputs |
 | `cFS_DockingSim/Assets/VehicleState.cs` | Rigidbody wrapper — mass set directly on Rigidbody; inertia auto-computed from mass + shape | Changing vehicle physical properties |
 | `cFS_DockingSim/Assets/ClohessyWiltshire.cs` | Applies orbital differential gravity every FixedUpdate | Changing mean motion or orbital altitude |
 | `cFS_DockingSim/Assets/ApproachCorridor.cs` | 15° cone; `inCorridor` flag, `corridorAngle` | Changing approach geometry |
 | `cFS_DockingSim/Assets/DockingDetector.cs` | Latches `isDocked` when 4 thresholds met; fires `onDock` event | Changing docking contact thresholds |
 | `cFS_DockingSim/Assets/RateDamping.cs` | Proportional rate-null controller (H key toggle); suppressed when cFS has authority | Changing attitude hold behavior |
-| `cFS_DockingSim/Assets/ThrusterDiagnostic.cs` | F8 automated per-group calibration (delta-V/delta-omega logging) | Re-measuring `BrakeAccel_*_mss` / `ApproachAccel_mss` |
+| `cFS_DockingSim/Assets/ThrusterDiagnostic.cs` | F8 hardware bench test: fires thruster groups and single thrusters, logs measured vs geometry-predicted ΔV/Δω | Suspected dead/mis-canted thruster |
 | `cFS_DockingSim/Assets/UdpTelemetrySender.cs` | Lock-step master: sends `SIM_STATE` each GNC cycle, waits for the answer | Adding telemetry fields, cycle rate |
-| `cFS_DockingSim/Assets/UdpCommandReceiver.cs` | Validates `WRENCH_CMD` frames; applies them via `SetWrenchCommand()` | Changing command format or timeout |
+| `cFS_DockingSim/Assets/UdpCommandReceiver.cs` | Validates `THRUSTER_CMD` frames; applies them via `RCSModel.SetThrusterOnTimes()` | Changing command format or timeout |
 
 ---
 
@@ -72,7 +73,7 @@ Defined in `gnc_app.h` as `GNC_Phase_t`. Transitions are computed in `GNC_APP_Se
                ▼
     ┌──────────────────────┐
     │     CORRECT (1)       │  Lateral offset > LatCorrectGate (1.50 m default).
-    │  Station-keep axially │  Drives Pos_X and Pos_Y to zero.
+    │  Station-keep axially │  Drives the port LatOffset_X/Y to zero.
     │  Kill lateral drift.  │◄──────────────────────┐
     └──────────┬───────────┘  lat offset > gate       │
                │  lat offset < LatApproachGate       │
@@ -100,6 +101,7 @@ Defined in `gnc_app.h` as `GNC_Phase_t`. Transitions are computed in `GNC_APP_Se
     └──────────────────────┘
 
     Any state ──ABORT──► IDLE  (AbortLatch set; GO required to release)
+    Any undocked state ──hand-controller deflection──► MANUAL (5)  (crew flying; GO → CORRECT)
 ```
 
 **Key transition constants** (live in `GNC_ParamTbl_t`, current defaults):
@@ -113,129 +115,107 @@ Defined in `gnc_app.h` as `GNC_Phase_t`. Transitions are computed in `GNC_APP_Se
 
 `SelectPhase()` also checks the Docked flag (bit 1 of telemetry Flags) and the HOLD command; those override gate logic. HOLD is sticky — only a ground `GO` or `ABORT` releases it; autonomous gate transitions never override a ground-commanded hold.
 
-**Autonomous hold points:** each hold point fires at most once per approach sequence and is re-armed only by `ABORT`+`GO` (which implies a scenario reset). The trigger range is adjusted by a brake-distance lookahead (`v²/BrakeAccel_Hard_mss`) so the vehicle actually stops near the configured waypoint rather than overshooting it before the next 1 Hz cycle. When a hold point fires — or a ground `HOLD` command is received — `GNC_APP_Data.HoldRange_m` captures the current range; this becomes the axial position-hold target (see Channel 1 below).
+**Autonomous hold points:** each hold point fires at most once per approach sequence and is re-armed only by `ABORT`+`GO` (which implies a scenario reset). The trigger range is adjusted by a brake-distance lookahead (`v²/AxialBrakeAccel_mss`) so the vehicle actually stops near the configured waypoint rather than overshooting it. When a hold point fires — or a ground `HOLD` command is received — `GNC_APP_Data.HoldRange_m` captures the current range; this becomes the axial position-hold target (see Channel 1 below).
 
 ---
 
 ## Control Law
 
-Implemented in `GNC_APP_ComputeControl()` in `gnc_app.c`. Called once per 1 Hz wakeup. Returns a body-frame wrench `{Fx, Fy, Fz, Tx, Ty, Tz, duration_s}` — not a thruster bitmask.
-
-### Fundamental math
+Implemented in `GNC_APP_ComputeControl()` in `gnc_app.c`, which runs once per SIM_STATE (every 0.2 s of sim time). It returns the **impulse** GNC wants imparted this cycle, `{Px, Py, Pz, Lx, Ly, Lz}` in the body frame, not thrusters or durations:
 
 ```
-thruster_accel = ThrusterForce / VehicleMass  = 400.0 N / 4500.0 kg ≈ 0.089 m/s²
-burn_duration  = |velocity_error| / thruster_accel
+P = VehicleMass × Δv          (N·s)
+L = Inertia_kgm2[axis] × Δω   (N·m·s, per axis — roll inertia is half of pitch/yaw)
 ```
 
-Duration is capped: `MinBurnDuration (0.05 s)` ≤ duration ≤ `MaxBurnDuration (0.95 s)`. Commands below the minimum are discarded (this is the effective dead-band). Translational and attitude channels can each want a different duration; whichever is longer sets the shared `duration_s`, and the *other* group's force/torque components are scaled down proportionally so the delivered impulse stays correct.
+The cFS **RCS app** turns that into valve on-times. It runs NNLS allocation over its thruster table, then PWM: 20 ms minimum impulse bit, 0.19 s per-cycle maximum, and direction-preserving scaling when a request saturates. So GNC no longer carries thruster force, moment arms, per-group accelerations or burn-duration limits. Phase 2 removed the brake-group choice, the shared-duration rescaling and the 0.65 CORRECT-phase +Fz coupling fudge, because they all existed to compensate for GNC not knowing the geometry.
 
 ### Clohessy-Wiltshire feedforward
 
-Before computing velocity errors, the control law computes predicted CW differential acceleration and folds it into the velocity error on each axis, canceling the orbital drift `ClohessyWiltshire.cs` applies every Unity `FixedUpdate`:
+The predicted CW Δv for one cycle is folded into each channel's velocity error, using the +V-bar LVLH mapping (radial = +Y, along-track = −Z, cross-track = +X):
 
 ```c
-n = GNC_CW_MEAN_MOTION  // 0.00113 rad/s (ISS altitude)
-
-ff_x = -(3*n²*Pos_X + 2*n*Vel_Y)    // radial feedforward
-ff_y =  2*n*Vel_X                    // along-track feedforward
-ff_z =  n²*Pos_Z                     // cross-track feedforward
+a_rad   =  3n²·RelPos_Y + 2n·(−RelVel_Z)     ff_y = −a_rad·dt
+a_along = −2n·RelVel_Y                        ff_z = +a_along·dt   (world az = −a_along)
+a_cross = −n²·RelPos_X                        ff_x = −a_cross·dt
 ```
 
-Without this the vehicle accumulates a persistent drift that the proportional terms alone never fully cancel.
+Known limitation (roadmap phase 5): the lateral feed-forward is added inside the deadbanded velocity error, so the ~5×10⁻⁵ m/s-per-cycle V-bar Coriolis term never builds up into a burn by itself.
 
 ### Channel breakdown
 
-**Channel 1 — Axial (Z, along docking axis)**
+**Channel 1 — Axial (body Z)**
 
 ```
-APPROACH:  v_target = clamp(AxialKp * range, MinCloseSpeed, cap)
-             cap = MaxCloseSpeed (0.30 m/s) before HoldPoint1_m has fired,
-                   MaxCloseSpeed_Inner (0.10 m/s) after it fires — models the
-                   real-world outer/inner closing-rate profile.
-HOLD:      v_target = clamp(AxialHoldKp * (Range_m - HoldRange_m), ±MaxHoldSpeed)
-             Position + velocity feedback toward the range captured at HOLD entry —
-             corrects accumulated range drift instead of just damping velocity.
-CORRECT:   v_target = 0   (pure axial station-keep while driving onto the axis)
-
-v_error  = v_target - ClosingSpeed_ms + ff_z
-
-if v_error > 0:  fire +Z (toward target), Fz += ThrusterForce,     dur = v_error / ApproachAccel_mss
-if v_error < 0:  fire −Z (away, braking), Fz -= brake_force,       dur = |v_error| / brake_accel
-                   brake_accel = BrakeAccel_Hard_mss  if |v_error| > MaxCloseSpeed/2
-                               = BrakeAccel_Light_mss otherwise
+APPROACH:  v_target = clamp(AxialKp × range, MinCloseSpeed, cap)
+             cap = MaxCloseSpeed before HoldPoint1_m fires, MaxCloseSpeed_Inner after
+HOLD:      v_target = clamp(AxialHoldKp × (Range_m − HoldRange_m), ±MaxHoldSpeed)
+CORRECT:   v_target = 0
+Δv_z = v_target − ClosingSpeed_ms + ff_z
 ```
 
-**Channel 2 — Lateral X / Y**
+**Channel 2 — Lateral X / Y** (steers on the port-relative `LatOffset_X/Y`)
 
 ```
-APPROACH:            v_target = 0                          (velocity-damp only; no position pull)
-CORRECT / HOLD:      v_target = clamp(-LatKp * Pos_X, ±MaxLatSpeed)
-
-v_error = v_target - Vel_X + ff_x
-if |v_error| > LatVelDeadband_ms:  fire ±X,  Fx ±= ThrusterForce,  dur = (|v_error| - deadband) / accel
+v_target = clamp(−Kp × LatOffset, ±MaxLatSpeed)     Kp = LatKp (CORRECT/HOLD), LatKp_Approach (APPROACH)
+v_error  = v_target − RelVel + ff
+Δv       = v_error ∓ deadband   if |v_error| > deadband, else 0
+             deadband = LatVelDeadband_ms (CORRECT), LatVelDeadband_Approach_ms (APPROACH)
 ```
 
-Same structure on Y with `Pos_Y`/`Vel_Y`/`ff_y`. The velocity deadband exists because without it, a 400 N impulse at 1 Hz overshoots the target velocity every cycle and the correction alternates sign (bang-bang chatter).
-
-**Lateral→axial coupling feedforward (CORRECT only):** `Fz += 0.4 * (|Fx| + |Fy|)`. Firing a lateral burn disturbs attitude, and the resulting braking-thruster correction couples a stronger-than-expected `−Z` force back in; this proactive term fires compensating `+Z` in the same cycle rather than one cycle late.
-
-**Channel 3 — Attitude PD (pitch/yaw/roll, all active phases)**
+**Channel 3 — Attitude (pitch/yaw/roll, all active phases)**
 
 ```
-omega_target = clamp(AttKp * error_rad, ±MaxAttRate)
-omega_error  = omega_target - AngVel
-
-dur = |omega_error| / RotAccel   → fires the corresponding torque direction (Tx/Ty/Tz)
+omega_target = clamp(AttKp × error_rad, ±MaxAttRate)
+Δω           = omega_target − AngVel
 ```
 
-Skipped entirely when all three axis errors are within a deadband **and** the vehicle isn't spinning (>0.01 rad/s on any axis). The deadband is `AttDeadband_deg` scaled by phase: 0.5× in APPROACH (tighter, for port precision), 2× in CORRECT (wider, so small lateral-burn-induced tilts coast instead of triggering a fight between channels), 1× in HOLD.
+This channel is skipped when all three errors are inside `AttDeadband_deg` (×0.5 in APPROACH, ×2 in CORRECT) **and** no axis spins faster than `SpinThreshold_rads`.
+
+**MANUAL — crew hand controllers** (`HandController.cs` → `Thc`/`Rhc` in SIM_STATE)
+
+```
+Δv = Thc × ManualAccel_mss × dt                  (translation: acceleration command)
+Δω = Rhc × ManualRate_rads − AngVel              (rotation: rate command, rate HOLD when released)
+     (0 inside ManualRateDeadband_rads, so the minimum impulse bit doesn't chatter)
+```
+
+Any stick deflection over 0.5 enters MANUAL from any undocked phase, including IDLE with the abort latch set. Only GO (→ CORRECT) or ABORT leaves it.
 
 ---
 
-## UDP Interface (SimLink v2)
+## UDP Interface (SimLink v3)
 
 The byte-level layouts, framing, CRC and lock-step protocol are defined in **[SIMLINK_ICD.md](SIMLINK_ICD.md)**. Short version:
 
-- Unity sends a 108-byte `SIM_STATE` frame to port 5005 once per GNC cycle (0.2 s of sim time), then holds that physics step.
-- cFS `sim_io` validates the frame and publishes it on the Software Bus. `gnc_app` runs one cycle and publishes `WRENCH_CMD`, and `sim_io` frames it back to Unity on port 5006 with the same Seq.
+- Unity sends a 132-byte `SIM_STATE` frame (nav state + crew hand controllers) to port 5005 once per GNC cycle (0.2 s of sim time), then holds that physics step.
+- cFS `sim_io` validates the frame and publishes it on the Software Bus. `gnc_app` runs one cycle and publishes an impulse request; `rcs` allocates it and publishes `THRUSTER_CMD` (valve on-times); `sim_io` frames that back to Unity on port 5006 with the same Seq.
 - Unity applies the command in the same physics step and continues. With no answer within 500 ms it drops to free-running, and it re-engages automatically.
 - If no command arrives for 3 s, `UdpCommandReceiver` clears cFS authority and zeros the thrusters.
 
 ---
 
-## Tunable Parameters (Parameter Table)
+## Tunable Parameters (Parameter Tables)
 
-All gains live in `GNC_ParamTbl_t` (defined in `gnc_app_tbl.h`, 24 floats / 96 bytes). Defaults are in `gnc_param_tbl.c` and compiled to `/cf/gnc_param_tbl.tbl`. The `ProcessSimState` cycle calls `CFE_TBL_Manage` every cycle; you can uplink a new table image to a running cFS without restart.
+**GNC** gains live in `GNC_ParamTbl_t` (`gnc_app_tbl.h`, defaults in `gnc_param_tbl.c` → `/cf/gnc_param_tbl.tbl`). `CFE_TBL_Manage` runs every cycle, so a new image can be uplinked to a running cFS. Highlights:
 
 | Field | Default | Units | Role |
 |-------|---------|-------|------|
-| `AxialKp` | 0.02 | 1/s | target closing speed = Kp × range |
-| `MinCloseSpeed` | 0.10 | m/s | Floor on axial closure rate — holds a constant soft-capture speed instead of tapering to zero |
-| `MaxCloseSpeed` | 0.30 | m/s | Outer axial closure cap, before HoldPoint1_m fires |
-| `MaxCloseSpeed_Inner` | 0.10 | m/s | Inner axial closure cap, after HoldPoint1_m fires |
-| `ThrusterForce` | 400.0 | N | Must match `RCSModel.thrusterForce` |
-| `VehicleMass` | 4500.0 | kg | Must match Unity Rigidbody mass |
-| `RotAccel` | 0.033 | rad/s² | Empirical rotation authority |
-| `MinBurnDuration` | 0.050 | s | Discard burns shorter than this |
-| `MaxBurnDuration` | 0.950 | s | Cap all burns at this |
-| `LatKp` | 0.02 | 1/s | lateral speed = Kp × position error (CORRECT/HOLD) |
-| `MaxLatSpeed` | 0.05 | m/s | Cap on lateral correction speed |
-| `LatApproachGate` | 1.00 | m | CORRECT→APPROACH threshold |
-| `LatCorrectGate` | 1.50 | m | APPROACH→CORRECT threshold (hysteresis) |
-| `HoldPoint1_m` | 20.0 | m | Outer autonomous HOLD (0 = disabled) |
-| `HoldPoint2_m` | 3.0 | m | Inner autonomous HOLD (0 = disabled) |
-| `AttKp` | 0.25 | (rad/s)/rad | Attitude proportional gain |
-| `MaxAttRate` | 0.20 | rad/s | Cap on commanded angular rate per axis |
-| `AttDeadband_deg` | 2.0 | deg | Skip attitude correction below this (scaled ×0.5/×2 by phase) |
-| `LatVelDeadband_ms` | 0.015 | m/s | Skip lateral correction below this velocity error |
-| `BrakeAccel_Hard_mss` | 0.281 | m/s² | Empirical decel, T08–T15 (hard stop) |
-| `BrakeAccel_Light_mss` | 0.136 | m/s² | Empirical decel, T08–T11 only (soft correct) |
-| `ApproachAccel_mss` | 0.163 | m/s² | Empirical accel, T04–T07 approach group |
-| `AxialHoldKp` | 0.02 | 1/s | HOLD axial position gain: target speed = Kp × (Range_m − HoldRange_m) |
-| `MaxHoldSpeed` | 0.05 | m/s | Cap on HOLD-phase axial position-correction speed |
+| `AxialKp` | 0.02 | 1/s | Target closing speed = Kp × range |
+| `MinCloseSpeed` / `MaxCloseSpeed` / `MaxCloseSpeed_Inner` | 0.10 / 0.30 / 0.10 | m/s | Axial speed floor, outer cap, inner cap |
+| `VehicleMass` | 12000 | kg | FSW mass model (impulse = m·Δv) |
+| `Inertia_kgm2` | 48000, 48000, 24000 | kg·m² | FSW inertia model per body axis (impulse = I·Δω) |
+| `LatKp` / `LatKp_Approach` | 0.02 / 0.006 | 1/s | Lateral position gains |
+| `MaxLatSpeed` | 0.05 | m/s | Lateral speed cap |
+| `LatVelDeadband_ms` / `_Approach_ms` | 0.00035 / 0.002 | m/s | Lateral velocity deadbands |
+| `AttKp` / `MaxAttRate` | 0.25 / 0.20 | (rad/s)/rad, rad/s | Attitude gain and rate cap |
+| `AttDeadband_deg` / `SpinThreshold_rads` | 1.0 / 0.003 | deg, rad/s | Attitude deadband and spin override |
+| `HoldPoint1_m` / `HoldPoint2_m` | 20 / 3 | m | Autonomous hold points (0 = off) |
+| `AxialBrakeAccel_mss` | 0.189 | m/s² | Planning estimate for the hold-point braking lookahead only |
+| `ManualAccel_mss` / `ManualRate_rads` / `ManualRateDeadband_rads` | 0.02 / 0.0175 / 0.0008 | m/s², rad/s | Crew hand-controller authority |
+| `TlmLossTimeoutSec` | 2.0 | s | Sim-link loss → auto-abort |
 
-**Coupling warning:** `ThrusterForce` and `VehicleMass` must exactly match Unity's `RCSModel.thrusterForce` and the Rigidbody mass. A mismatch makes computed burn durations wrong, causing overshoot or drift accumulation. `BrakeAccel_*`/`ApproachAccel_mss` are empirical — re-measure with `ThrusterDiagnostic.cs` (F8) rather than recomputing from `ThrusterForce`/`VehicleMass` if thruster geometry changes, since the binary on/off thruster model at a 1 Hz discrete loop doesn't match the theoretical continuous-thrust value.
+**RCS** lives in `RCS_ThrTbl_t` (`rcs_tbl.h`, defaults in `rcs_thr_tbl.c` → `/cf/rcs_thr_tbl.tbl`, managed on the 1 Hz HK tick). It holds `Thrust_N` (400), `MinOnTime_s` (0.020), `MaxOnTime_s` (0.190), and per-thruster `Pos_m`/`Dir`/`Enabled` (T00–T03 disabled).
 
 ---
 
@@ -252,10 +232,11 @@ All gains live in `GNC_ParamTbl_t` (defined in `gnc_app_tbl.h`, 24 floats / 96 b
 | `pitchError` / `yawError` / `rollError` | per-axis decomposition of the port-to-port error quaternion | `PitchError_deg` / `YawError_deg` / `RollError_deg` |
 
 Full 6-DOF state (position, velocity, angular velocity) is also in the packet. cFS currently uses:
-- `Pos_X`, `Pos_Y` for lateral position control (CORRECT/HOLD)
-- `Vel_X`, `Vel_Y`, `Vel_Z` for feedforward and error computation
+- `LatOffset_X`, `LatOffset_Y` (port-relative) for lateral position control
+- `RelPos`, `RelVel` (target-relative) for the CW feed-forward and lateral velocity error
 - `AngVel_X/Y/Z` for the attitude D-term
-- `ClosingSpeed_ms` for axial closure control (smoother than differencing range)
+- `ClosingSpeed_ms` (rate along the docking axis) for axial closure control
+- `Thc`, `Rhc` (crew hand controllers) for MANUAL flight
 - `PitchError_deg`/`YawError_deg`/`RollError_deg` for the attitude P-term
 
 `Range_m` and `LateralOffset_m` are used for phase gate logic and hold-point lookahead, not directly in the axial/lateral control law.
@@ -264,19 +245,17 @@ Full 6-DOF state (position, velocity, angular velocity) is also in the packet. c
 
 ## Key Coupling Constraints
 
-These values must be consistent across both codebases. A mismatch causes silent physics errors that are hard to debug — this table is the single place both sides' code comments point to instead of pointing at each other (see `gnc_param_tbl.c`, `gnc_app_tbl.h`, and `RCSModel.cs`).
+The Unity scene is the real hardware and cFS tables are flight software's model of it, so most values no longer have to match exactly. A difference is a realistic modeling error that the closed loop absorbs, not a silent bug. The rows marked **must match** are interface definitions, and a mismatch breaks the link.
 
-| Value | cFS location | Unity location |
-|-------|-------------|----------------|
-| Thruster force 400 N | `ParamTbl.ThrusterForce` | `RCSModel.thrusterForce` |
-| Vehicle mass 4500 kg | `ParamTbl.VehicleMass` | Rigidbody mass (Inspector) |
-| Moment arm 1.5 m | `GNC_RCS_MOMENT_ARM` in `gnc_app.h` | `RCSModel` thruster position vectors |
-| Mean motion 0.00113 rad/s | `GNC_CW_MEAN_MOTION` in `gnc_app.h` | `ClohessyWiltshire.meanMotion` |
-| Approach corridor half-angle 15° | `ParamTbl.ConeHalfAngle_deg` | `ApproachCorridor.coneHalfAngle` |
-| Brake threshold | `BrakeAccel_Hard_mss` / `BrakeAccel_Light_mss` × `VehicleMass` | `RCSModel.SoftBrakeThreshold_N` (938 N) |
-| SimLink frame layouts | `simlink_icd.h` (sim_io) — static-asserted sizes | `SimLinkProtocol.cs` |
-
-When changing any value on this list, update both locations in the same commit — there is no runtime sync between the two codebases (they're separate processes talking over UDP), so a mismatch fails silently as systematically wrong burn durations or corridor geometry rather than a compile/load error.
+| Value | cFS location | Unity location | |
+|-------|-------------|----------------|--|
+| SimLink frame layouts | `simlink_icd.h` (sim_io), static-asserted sizes | `SimLinkProtocol.cs` | **must match** |
+| Thruster count / index order (16, T00–T15) | `RCS_ThrTbl` rows | `RCSModel.thrusterTransforms` order | **must match** |
+| Thruster geometry | `rcs_thr_tbl.c` | thruster transforms + CoM override | model (regenerate via context menu) |
+| Thrust 400 N | `RCS_ThrTbl.Thrust_N` | `RCSModel.thrusterForce` | model |
+| Mass 12000 kg / inertia (48000, 48000, 24000) kg·m² | `ParamTbl.VehicleMass`, `Inertia_kgm2` | Rigidbody mass; `VehicleState` shape | model |
+| Mean motion 0.00113 rad/s | `GNC_CW_MEAN_MOTION` in `gnc_app.h` | `ClohessyWiltshire.meanMotion` | model |
+| Approach corridor half-angle 15° | `ParamTbl.ConeHalfAngle_deg` | `ApproachCorridor.coneHalfAngle` | model |
 
 ---
 
@@ -316,9 +295,9 @@ Set `HoldPoint1_m` and/or `HoldPoint2_m` in `gnc_param_tbl.c` (0 disables a wayp
 
 The feedforward is hardcoded in `GNC_APP_ComputeControl()` using `GNC_CW_MEAN_MOTION` (a `#define` in `gnc_app.h`, not yet in the parameter table). Add it to `GNC_ParamTbl_t` in `gnc_app_tbl.h` if you want to tune it at runtime.
 
-### Recalibrate empirical acceleration constants
+### Check the thruster hardware / regenerate the RCS table
 
-Run cFS with guidance in ABORT/IDLE, press **F8** in Unity to run `ThrusterDiagnostic.cs`, and read the delta-V / delta-omega it logs (prefixed `[DIAG]`) for each thruster group. Update `ApproachAccel_mss`, `BrakeAccel_Hard_mss`, `BrakeAccel_Light_mss`, and `RotAccel` in `gnc_param_tbl.c` to match.
+With cFS stopped, press **F8** in Unity to run `ThrusterDiagnostic.cs`. It fires each thruster group and each thruster alone, then logs measured vs geometry-predicted ΔV/Δω (`[DIAG]`, with a `*** MEASURED != PREDICTED ***` flag). After moving or re-canting thrusters, run RCSModel's **"Log cFS thruster table"** context-menu item and paste the rows into `cFS/apps/rcs/fsw/tables/rcs_thr_tbl.c`. There are no GNC acceleration constants to recalibrate any more.
 
 ---
 

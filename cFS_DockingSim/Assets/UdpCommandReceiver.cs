@@ -5,7 +5,8 @@ using System.Threading;
 using UnityEngine;
 
 /// <summary>
-/// Receives SimLink WRENCH_CMD frames from cFS (SIM_IO app) and applies them to RCSModel.
+/// Receives SimLink THRUSTER_CMD frames (valve on-times from the cFS RCS app, via SIM_IO)
+/// and hands them to RCSModel, which just opens and closes the valves.
 /// See SimLinkProtocol / Docs/SIMLINK_ICD.md for the frame format.
 ///
 /// Two ways a command gets applied:
@@ -40,7 +41,7 @@ public class UdpCommandReceiver : MonoBehaviour
     // Newest valid command from the recv thread. Guarded by _lock; Monitor.PulseAll
     // on arrival wakes a lock-step WaitForCommand.
     private readonly object              _lock = new object();
-    private SimLinkProtocol.WrenchCmd?   _latest;
+    private SimLinkProtocol.ThrusterCmd?   _latest;
     private uint                         _lastAppliedSeq;
     private bool                         _haveApplied;
 
@@ -58,10 +59,16 @@ public class UdpCommandReceiver : MonoBehaviour
     /// </summary>
     public bool LockStepEngaged { get; set; }
 
-    /// <summary>Most recent GNC phase (GNC_Phase_t: 0=IDLE … 4=HOLD); -1 before any command.</summary>
+    /// <summary>Most recent GNC phase (GNC_Phase_t: 0=IDLE … 4=HOLD, 5=MANUAL); -1 before any command.</summary>
     public int GncPhase { get; private set; } = -1;
 
-    /// <summary>Last wrench actually applied (for HUD/debug). Zeroed on command timeout.</summary>
+    /// <summary>Last valve on-times applied (s per thruster). Null before any command.</summary>
+    public float[] LastOnTimes { get; private set; }
+
+    /// <summary>
+    /// HUD/debug view of the last command: body force/torque the valve pulses produce
+    /// (impulse ÷ longest pulse) and the longest pulse. Zeroed on command timeout.
+    /// </summary>
     public Vector3 LastForce    { get; private set; }
     public Vector3 LastTorque   { get; private set; }
     public float   LastDuration { get; private set; }
@@ -101,7 +108,7 @@ public class UdpCommandReceiver : MonoBehaviour
             try
             {
                 byte[] data = listener.Receive(ref remote);
-                var cmd = SimLinkProtocol.TryParseWrenchCmd(data, data.Length, out string reason);
+                var cmd = SimLinkProtocol.TryParseThrusterCmd(data, data.Length, out string reason);
                 if (cmd == null)
                 {
                     Interlocked.Increment(ref _rxBad);
@@ -139,7 +146,7 @@ public class UdpCommandReceiver : MonoBehaviour
     /// </summary>
     public bool WaitForCommand(uint seq, int timeoutMs)
     {
-        SimLinkProtocol.WrenchCmd cmd;
+        SimLinkProtocol.ThrusterCmd cmd;
         lock (_lock)
         {
             var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
@@ -162,7 +169,7 @@ public class UdpCommandReceiver : MonoBehaviour
         // Free-running path only — in lock-step, WaitForCommand owns application.
         if (!LockStepEngaged)
         {
-            SimLinkProtocol.WrenchCmd? pending = null;
+            SimLinkProtocol.ThrusterCmd? pending = null;
             lock (_lock)
             {
                 if (_latest != null && (!_haveApplied || _latest.Value.Seq != _lastAppliedSeq))
@@ -183,24 +190,33 @@ public class UdpCommandReceiver : MonoBehaviour
         }
     }
 
-    void Apply(in SimLinkProtocol.WrenchCmd cmd)
+    void Apply(in SimLinkProtocol.ThrusterCmd cmd)
     {
         _lastAppliedSeq = cmd.Seq;
         _haveApplied    = true;
 
         GncPhase = cmd.GncPhase;
-        if (rcsModel != null)
-            rcsModel.SetWrenchCommand(cmd.Force, cmd.Torque, cmd.Duration_s);
         lastCmdTime = Time.time;
         cfsActive   = true;
 
-        LastForce    = cmd.Force;
-        LastTorque   = cmd.Torque;
-        LastDuration = cmd.Duration_s;
+        float maxOn = 0f;
+        foreach (float t in cmd.OnTime_s) maxOn = Mathf.Max(maxOn, t);
+        LastOnTimes  = cmd.OnTime_s;
+        LastDuration = maxOn;
+
+        if (rcsModel != null)
+        {
+            rcsModel.SetThrusterOnTimes(cmd.OnTime_s);
+            // HUD only: the body force/torque these valve pulses produce, averaged over the
+            // longest pulse, from the vehicle's actual (scene) thruster geometry.
+            rcsModel.ImpulseFromOnTimes(cmd.OnTime_s, out Vector3 lin, out Vector3 ang);
+            LastForce  = maxOn > 0f ? lin / maxOn : Vector3.zero;
+            LastTorque = maxOn > 0f ? ang / maxOn : Vector3.zero;
+        }
 
         if (debugLog)
-            Debug.Log($"[UdpCommandReceiver] Seq {cmd.Seq} F=({cmd.Force.x:F1},{cmd.Force.y:F1},{cmd.Force.z:F1})N " +
-                      $"T=({cmd.Torque.x:F1},{cmd.Torque.y:F1},{cmd.Torque.z:F1})Nm dur={cmd.Duration_s:F3}s");
+            Debug.Log($"[UdpCommandReceiver] Seq {cmd.Seq} phase {cmd.GncPhase} on-times " +
+                      string.Join(" ", System.Array.ConvertAll(cmd.OnTime_s, t => t.ToString("F3"))));
     }
 
     void OnDestroy()

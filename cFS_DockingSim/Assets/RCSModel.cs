@@ -1,74 +1,51 @@
 using UnityEngine;
 
 /// <summary>
-/// Physical thruster definition — position and thrust direction in body frame.
-/// Position is the offset from the vehicle CoM (meters).
-/// Direction is the unit thrust vector (OPPOSITE to local +Z of the scene Transform, which is the exhaust direction).
-/// When fired, a thruster produces:
-///   Force  = direction * throttle_N
-///   Torque = AddForceAtPosition handles this via world-space position
-/// </summary>
-[System.Serializable]
-public struct ThrusterDef
-{
-    public Vector3 position;   // body-frame offset from CoM (m)
-    public Vector3 direction;  // body-frame unit thrust vector
-
-    public ThrusterDef(Vector3 pos, Vector3 dir)
-    {
-        position  = pos;
-        direction = dir.normalized;
-    }
-}
-
-/// <summary>
-/// Proportional RCS thruster control for the chaser.
+/// RCS thruster HARDWARE model for the chaser — valves and nozzles, nothing more.
 ///
-/// Each thruster fires at an independently computed force level (0..thrusterForce N)
-/// rather than binary on/off at full power.  This is essential for clean 6-DOF
-/// translation: the pseudo-inverse allocator assigns fractional throttles whose
-/// torques cancel each other — but only if those fractions are actually respected
-/// when the forces are applied.  Binary on/off destroys that cancellation and
-/// produces the unwanted rotations during lateral translation.
+/// Since realism phase 2 all thruster decisions live in flight software: the cFS RCS app
+/// allocates GNC's impulse request across the thrusters (from its own thruster table),
+/// converts it into per-thruster valve on-times (PWM, minimum impulse bit), and those
+/// on-times arrive here via SIM_IO → UdpCommandReceiver.SetThrusterOnTimes. This component
+/// only opens each valve at the start of the cycle, applies full rated thrust at the
+/// nozzle while it is open, and closes it after its on-time. Draco thrusters don't
+/// throttle — a thruster is either firing at thrusterForce or off.
 ///
-/// Throttle sources (in priority order):
-///   1. External control    — cFS or ThrusterTestUI via SetWrenchCommand /
-///                            SetThrusterCommand.  Expires after burnEndTime.
-///   2. Keyboard (WASD etc) — binary; any thruster with a positive pseudo-inverse
-///                            allocation fires at full thrusterForce, all others off.
+/// Valve timing is resolved within a physics step: a valve that closes part-way through a
+/// step contributes the matching fraction of that step's thrust, so the delivered impulse
+/// equals thrusterForce × on-time regardless of the 0.02 s physics tick.
+///
+/// Crew keyboard input no longer fires thrusters directly — see HandController (it goes
+/// through cFS like the real vehicle's hand controllers).
 /// </summary>
 public class RCSModel : MonoBehaviour
 {
     public VehicleState vehicle;
 
-    [Header("Thruster Authority")]
-    [Tooltip("Newtons per thruster — must match ThrusterForce in the cFS parameter table. " +
-             "See \"Key Coupling Constraints\" in Docs/DEV_REFERENCE.md for the full list.")]
-    public float thrusterForce = 10f;
+    [Header("Thruster Hardware")]
+    [Tooltip("Rated thrust of every thruster (N) — the real hardware value. The cFS RCS app has " +
+             "its own copy (RCS_ThrTbl.Thrust_N); a mismatch shows up as a thrust-magnitude modelling " +
+             "error for flight software to cope with, not as a broken link.")]
+    public float thrusterForce = 400f;
 
-    [Header("Thruster Geometry")]
     [Tooltip("One Transform per physical thruster. Local +Z = exhaust direction (nozzle out). " +
              "Force is applied in the −Z direction at that world position.")]
     [SerializeField] private Transform[] thrusterTransforms;
 
-    // Body-frame ThrusterDef array built from thrusterTransforms at Awake.
-    private ThrusterDef[]     _thrusters = new ThrusterDef[0];
-    // Per-thruster throttle in Newtons (0..thrusterForce).  Primary command state.
-    private float[]           _throttles = new float[0];
-    // External (wrench/mask) command level per thruster, in Newtons (0..thrusterForce),
-    // applied continuously for the shared [now, burnEndTime] window. All active thrusters
-    // must fire simultaneously at their solved ratio for the pseudo-inverse's torque
-    // cancellation to hold — staggering per-thruster on-durations (PWM) breaks that
-    // ratio the moment the first thruster shuts off early. See SetWrenchCommand.
-    private float[]           _externalThrottle = new float[0];
-    private Rigidbody         _rb;
-    private ThrusterAllocator _allocator;
+    [Header("Debug")]
+    [Tooltip("Suppress all thruster forces (T key). Valves still report open for gizmos/UI.")]
+    public bool suppressForces = false;
 
-    public ThrusterDef[] GetThrusters() => _thrusters;
-    public int ThrusterCount => _thrusters.Length;
+    // Time.fixedTime at which each valve closes; at or before "now" = closed.
+    private float[]   _valveCloseTime = new float[0];
+    // Thrust (N) each thruster applied in the most recent physics step — UI/plumes/gizmos.
+    private float[]   _throttles      = new float[0];
+    private Rigidbody _rb;
+
+    public int         ThrusterCount      => thrusterTransforms != null ? thrusterTransforms.Length : 0;
     public Transform[] ThrusterTransforms => thrusterTransforms;
 
-    /// <summary>Returns the normalized throttle (0–1) for thruster i. Safe to call before init.</summary>
+    /// <summary>Thrust fraction (0–1) thruster i applied last physics step. Safe to call before init.</summary>
     public float GetThrottle(int i) =>
         (_throttles != null && i >= 0 && i < _throttles.Length && thrusterForce > 0f)
             ? _throttles[i] / thrusterForce
@@ -81,10 +58,7 @@ public class RCSModel : MonoBehaviour
         thrusterTransforms[index] != null &&
         thrusterTransforms[index].gameObject.activeInHierarchy;
 
-    /// <summary>
-    /// Bitmask derived from _throttles for gizmos and UI display.
-    /// Bit i is set when thruster i is firing at ≥5% of full power.
-    /// </summary>
+    /// <summary>Bit i set when thruster i fired at ≥5% of a full step last physics step (gizmos/UI).</summary>
     public int CurrentThrusterMask
     {
         get
@@ -97,303 +71,162 @@ public class RCSModel : MonoBehaviour
         }
     }
 
-    [Header("Debug")]
-    [Tooltip("Suppress all thruster forces (T key). Thrusters still appear active in gizmos.")]
-    public bool suppressForces = false;
-
-    private bool  externalControl = false;
-    private float burnEndTime     = -1f;
-
     void Awake()
     {
-        // Only pre-allocate here. BuildThrusterArray() is deferred to Start() via coroutine
-        // so that VehicleState.Start() has already applied centerOfMassOverride before we
-        // compute moment arms for the B matrix.
-        _throttles        = new float[0];
-        _externalThrottle = new float[0];
+        EnsureArrays();
     }
 
     void Start()
     {
-        StartCoroutine(DelayedInit());
-    }
-
-    System.Collections.IEnumerator DelayedInit()
-    {
-        // Wait one frame so all Start() calls complete — specifically VehicleState.Start(),
-        // which applies rb.centerOfMass = centerOfMassOverride. Without this, the B matrix
-        // is built against the wrong CoM and torque-cancellation throttles are wrong.
-        yield return null;
-
         if (vehicle != null)
             _rb = vehicle.GetComponent<Rigidbody>();
-
-        BuildThrusterArray();
-        _throttles        = new float[_thrusters.Length];
-        _externalThrottle = new float[_thrusters.Length];
-
-        if (_thrusters.Length > 0)
-        {
-            _allocator = new ThrusterAllocator();
-            _allocator.Initialize(_thrusters);
-        }
     }
-
-    void BuildThrusterArray()
-    {
-        if (thrusterTransforms == null || thrusterTransforms.Length == 0)
-        {
-            _thrusters = new ThrusterDef[0];
-            return;
-        }
-
-        // The B matrix torque column is r × direction, where r is the moment arm from
-        // the CoM to the thruster.  Using transform.origin instead of rb.worldCenterOfMass
-        // gives the wrong moment arms when centerOfMassOverride is non-zero, causing the
-        // allocator's torque-cancellation throttles to not match what Unity actually applies.
-        Vector3 worldCoM = _rb != null
-            ? vehicle.transform.TransformPoint(_rb.centerOfMass)
-            : transform.position;
-
-#if UNITY_EDITOR
-        Vector3 comLocal = transform.InverseTransformPoint(worldCoM);
-        Debug.Log($"[RCSModel] Building B-matrix.  CoM in body frame: {comLocal:F3}");
-#endif
-
-        _thrusters = new ThrusterDef[thrusterTransforms.Length];
-        for (int i = 0; i < thrusterTransforms.Length; i++)
-        {
-            if (thrusterTransforms[i] == null || !thrusterTransforms[i].gameObject.activeInHierarchy)
-            {
-                // Zero direction → zero B-matrix column → allocator never picks this thruster.
-                _thrusters[i] = new ThrusterDef(Vector3.zero, Vector3.zero);
-                continue;
-            }
-            // Child's local +Z is the exhaust direction; force is in −Z (Newton's 3rd law).
-            // Moment arm = thruster world pos − CoM world pos, rotated into body frame.
-            Vector3 momentArm = transform.InverseTransformDirection(
-                thrusterTransforms[i].position - worldCoM);
-            Vector3 localDir = -transform.InverseTransformDirection(thrusterTransforms[i].forward);
-            _thrusters[i] = new ThrusterDef(momentArm, localDir);
-        }
-    }
-
-    // ── Test mode ─────────────────────────────────────────────────────────────
-    // Hold backtick (`) to enter test mode.  Number keys 1-9 = T00-T08,
-    // 0 = T09, - = T10, = = T11, F1-F4 = T12-T15.  Multiple keys fire simultaneously.
-    // Test mode uses binary full-power so you can feel each thruster's individual effect.
 
     void Update()
     {
         if (Input.GetKeyDown(KeyCode.T)) suppressForces = !suppressForces;
-
-        // ── Keyboard / cFS control ────────────────────────────────────────
-        if (externalControl) return;
-
-        // Body-frame: +Z = toward ISS, +X = right, +Y = up.
-        Vector3 desiredForce  = Vector3.zero;
-        Vector3 desiredTorque = Vector3.zero;
-
-        if (Input.GetKey(KeyCode.W))           desiredForce  += Vector3.forward;
-        if (Input.GetKey(KeyCode.S))           desiredForce  -= Vector3.forward;
-        if (Input.GetKey(KeyCode.D))           desiredForce  += Vector3.right;
-        if (Input.GetKey(KeyCode.A))           desiredForce  -= Vector3.right;
-        if (Input.GetKey(KeyCode.Space))       desiredForce  += Vector3.up;
-        if (Input.GetKey(KeyCode.LeftControl)) desiredForce  -= Vector3.up;
-        if (Input.GetKey(KeyCode.R))           desiredTorque += Vector3.right;   // pitch nose up
-        if (Input.GetKey(KeyCode.F))           desiredTorque -= Vector3.right;   // pitch nose down
-        if (Input.GetKey(KeyCode.E))           desiredTorque += Vector3.up;      // yaw right
-        if (Input.GetKey(KeyCode.Q))           desiredTorque -= Vector3.up;      // yaw left
-        if (Input.GetKey(KeyCode.Z))           desiredTorque += Vector3.forward; // roll CW
-        if (Input.GetKey(KeyCode.X))           desiredTorque -= Vector3.forward; // roll CCW
-
-        EnsureThrottleArray();
-
-        if (desiredForce == Vector3.zero && desiredTorque == Vector3.zero)
-        {
-            System.Array.Clear(_throttles, 0, _throttles.Length);
-            return;
-        }
-
-        if (_allocator == null)
-        {
-            System.Array.Clear(_throttles, 0, _throttles.Length);
-            return;
-        }
-
-        // Allocate() solves only over docking-permitted thrusters and always returns
-        // a non-negative, mask-respecting result — no post-hoc clamping/zeroing needed.
-        float[] raw = _allocator.Allocate(desiredForce, desiredTorque, OrbitalLockoutMask());
-
-        float maxRaw = 0f;
-        for (int i = 0; i < raw.Length; i++)
-            if (raw[i] > maxRaw) maxRaw = raw[i];
-
-        if (maxRaw < 1e-6f)
-        {
-            System.Array.Clear(_throttles, 0, _throttles.Length);
-            return;
-        }
-
-        // Binary on/off: fire any thruster the allocator gave a positive allocation.
-        // Realistic to Draco hardware — no analog throttle, just full power or off.
-        for (int i = 0; i < raw.Length && i < _throttles.Length; i++)
-            _throttles[i] = raw[i] > 1e-4f ? thrusterForce : 0f;
     }
 
     void FixedUpdate()
     {
-        // External control: every active thruster holds its solved throttle level
-        // simultaneously for the whole [now, burnEndTime] window, so the pseudo-inverse's
-        // torque-cancelling ratio between thrusters holds at every instant, not just at
-        // the start of the burn (see SetWrenchCommand).
-        if (externalControl)
-        {
-            bool expired = Time.fixedTime >= burnEndTime;
-            for (int i = 0; i < _throttles.Length && i < _externalThrottle.Length; i++)
-                _throttles[i] = expired ? 0f : _externalThrottle[i];
+        EnsureArrays();
+        float now = Time.fixedTime;
+        float dt  = Time.fixedDeltaTime;
 
-            // TEMP DIAGNOSTIC — remove once the external-command dead-thrust bug is found.
-            float throttleSum = 0f;
-            for (int i = 0; i < _throttles.Length; i++) throttleSum += _throttles[i];
-            Debug.Log($"[RCSModel/DIAG] FixedUpdate: externalControl=true expired={expired} " +
-                      $"now(fixedTime)={Time.fixedTime:F3} burnEndTime={burnEndTime:F3} " +
-                      $"throttleSum={throttleSum:F1} vehicleNull={vehicle == null} rbNull={_rb == null} " +
-                      $"suppressForces={suppressForces}");
+        for (int i = 0; i < _throttles.Length; i++)
+        {
+            // Fraction of this step the valve is open: 1 for a full step, partial on the step
+            // it closes in, 0 once closed.
+            float open = Mathf.Clamp01((_valveCloseTime[i] - now) / dt);
+            _throttles[i] = IsThrusterActive(i) ? thrusterForce * open : 0f;
         }
 
-        if (vehicle == null || _thrusters.Length == 0 || _rb == null) return;
-        if (suppressForces) return;
+        if (_rb == null || suppressForces) return;
 
-        for (int i = 0; i < _throttles.Length && i < 32; i++)
+        for (int i = 0; i < _throttles.Length; i++)
         {
-            if (_throttles[i] < 1e-6f) continue;
-            if (thrusterTransforms[i] == null) continue;
-            if (!thrusterTransforms[i].gameObject.activeInHierarchy) continue;
-
-            // Proportional force: respects the pseudo-inverse ratios that cancel torques.
-            float   f          = Mathf.Min(_throttles[i], thrusterForce);
-            Vector3 worldForce = transform.TransformDirection(_thrusters[i].direction) * f;
-            Vector3 worldPos   = thrusterTransforms[i].position;
-            _rb.AddForceAtPosition(worldForce, worldPos, ForceMode.Force);
-
-            // TEMP DIAGNOSTIC — remove once the external-command dead-thrust bug is found.
-            if (i == 0)
-                Debug.Log($"[RCSModel/DIAG] AddForceAtPosition firing: thruster0 f={f:F1}N " +
-                          $"worldForce={worldForce} rb.isKinematic={_rb.isKinematic} " +
-                          $"rb.linearVelocity={_rb.linearVelocity} rb.angularVelocity={_rb.angularVelocity}");
+            if (_throttles[i] <= 0f) continue;
+            Transform t = thrusterTransforms[i];
+            // Exhaust leaves along the nozzle's +Z; the vehicle is pushed along −Z.
+            _rb.AddForceAtPosition(-t.forward * _throttles[i], t.position, ForceMode.Force);
         }
     }
 
-    // ── External control API ──────────────────────────────────────────────────
+    // ── Valve command API ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// Binary mask command used by ThrusterTestUI and legacy paths.
-    /// Selected thrusters fire at full thrusterForce for the full duration; others are zeroed.
+    /// Open thruster i's valve for onTimes[i] seconds starting now (0 = stay closed).
+    /// Called by UdpCommandReceiver with the cFS RCS app's on-times each GNC cycle.
+    /// </summary>
+    public void SetThrusterOnTimes(float[] onTimes)
+    {
+        EnsureArrays();
+        float start = ValveStartTime();
+        for (int i = 0; i < _valveCloseTime.Length; i++)
+        {
+            float t = (onTimes != null && i < onTimes.Length) ? onTimes[i] : 0f;
+            _valveCloseTime[i] = t > 0f ? start + t : start;
+        }
+    }
+
+    /// <summary>
+    /// Bench-test path (ThrusterTestUI, ThrusterDiagnostic): fire the thrusters in
+    /// <paramref name="mask"/> at full thrust for <paramref name="duration"/> seconds, bypassing
+    /// flight software entirely — like firing valves from ground support equipment.
     /// </summary>
     public void SetThrusterCommand(int mask, float duration)
     {
-        externalControl = true;
-        burnEndTime     = Time.fixedTime + duration;
-        EnsureThrottleArray();
-        for (int i = 0; i < _externalThrottle.Length && i < 32; i++)
-            _externalThrottle[i] = (mask & (1 << i)) != 0 ? thrusterForce : 0f;
+        EnsureArrays();
+        var onTimes = new float[_valveCloseTime.Length];
+        for (int i = 0; i < onTimes.Length && i < 32; i++)
+            onTimes[i] = (mask & (1 << i)) != 0 ? duration : 0f;
+        SetThrusterOnTimes(onTimes);
     }
 
-    /// <summary>
-    /// Proportional wrench command from cFS.  The pseudo-inverse allocates the
-    /// desired force/torque across all thrusters as a fractional Newtons-per-thruster
-    /// solution whose off-axis components cancel — achieving clean 6-DOF translation.
-    /// </summary>
-    // Force magnitude below this threshold is treated as a light brake command (T08-T11 only).
-    // cFS sends BrakeAccel_Light_mss * VehicleMass (0.133 × 12000 = 1596 N) for fine corrections
-    // and BrakeAccel_Hard_mss * VehicleMass (0.189 × 12000 = 2268 N) for hard stops.
-    // Threshold = midpoint = 1932 N.  Updated 2026-07-11 for VehicleMass = 12000 (was 938 N at
-    // the old 4500 kg mass — see "Key Coupling Constraints" in Docs/DEV_REFERENCE.md).
-    private const float SoftBrakeThreshold_N = 1932f;
-
-    /// <summary>
-    /// T00–T03 are orbital retrograde thrusters — never used for docking maneuvers.
-    /// Base mask for every docking-phase allocation; callers narrow it further
-    /// (e.g. soft-brake group selection below).
-    /// </summary>
-    private bool[] OrbitalLockoutMask()
-    {
-        bool[] mask = new bool[_thrusters.Length];
-        for (int i = 0; i < mask.Length; i++) mask[i] = true;
-        for (int i = 0; i < Mathf.Min(4, mask.Length); i++) mask[i] = false;
-        return mask;
-    }
-
-    public void SetWrenchCommand(Vector3 force, Vector3 torque, float duration)
-    {
-        if (_allocator == null || !_allocator.IsReady)
-        {
-            SetThrusterCommand(0, 0f);
-            return;
-        }
-        if (force.sqrMagnitude < 1e-6f && torque.sqrMagnitude < 1e-6f)
-        {
-            SetThrusterCommand(0, 0f);
-            return;
-        }
-
-        externalControl = true;
-        burnEndTime     = Time.fixedTime + duration;
-        EnsureThrottleArray();
-
-        bool[] activeMask = OrbitalLockoutMask();
-
-        // Brake group selection: cFS sends a smaller force magnitude for gentle corrections
-        // (soft brake = T08-T11 only) vs hard stops (all 8 = T08-T15).
-        // If purely braking (−Z, no significant lateral demand) and force is below the soft
-        // threshold, exclude T12-T15 (the inner brake ring) for a lighter impulse.
-        if (force.z < -0.5f && force.z > -SoftBrakeThreshold_N &&
-            Mathf.Abs(force.x) < 1f && Mathf.Abs(force.y) < 1f)
-        {
-            for (int i = 12; i < Mathf.Min(16, activeMask.Length); i++)
-                activeMask[i] = false;
-        }
-
-        // Allocate() solves only over the active thrusters above and always returns
-        // a non-negative, mask-respecting result — no post-hoc clamping/zeroing needed.
-        float[] raw = _allocator.Allocate(force, torque, activeMask);
-
-        // Analog per-thruster throttle: each thruster holds its solved Newtons level
-        // (clamped to thrusterForce) for the entire commanded window, all firing
-        // simultaneously. This is what the pseudo-inverse actually solved for — the
-        // off-axis components only cancel if every thruster's contribution is present
-        // at every instant. Turning thrusters off at staggered times (duration-based
-        // PWM) or flattening everyone to full power both distort that ratio and leak
-        // into the axial/attitude channels as unmodeled coupling.
-        for (int i = 0; i < raw.Length && i < _externalThrottle.Length; i++)
-            _externalThrottle[i] = Mathf.Clamp(raw[i], 0f, thrusterForce);
-
-        // TEMP DIAGNOSTIC — remove once the external-command dead-thrust bug is found.
-        float rawSum = 0f, extSum = 0f;
-        for (int i = 0; i < raw.Length; i++) rawSum += raw[i];
-        for (int i = 0; i < _externalThrottle.Length; i++) extSum += _externalThrottle[i];
-        Debug.Log($"[RCSModel/DIAG] SetWrenchCommand: F=({force.x:F0},{force.y:F0},{force.z:F0}) " +
-                  $"T=({torque.x:F0},{torque.y:F0},{torque.z:F0}) dur={duration:F3} " +
-                  $"rawSum={rawSum:F1} extThrottleSum={extSum:F1} burnEndTime={burnEndTime:F3} " +
-                  $"now(fixedTime)={Time.fixedTime:F3}");
-    }
-
+    /// <summary>Close every valve immediately.</summary>
     public void ClearExternalControl()
     {
-        externalControl = false;
-        burnEndTime     = -1f;
-        EnsureThrottleArray();
+        EnsureArrays();
+        for (int i = 0; i < _valveCloseTime.Length; i++) _valveCloseTime[i] = -1f;
         System.Array.Clear(_throttles, 0, _throttles.Length);
-        System.Array.Clear(_externalThrottle, 0, _externalThrottle.Length);
     }
 
-    void EnsureThrottleArray()
+    /// <summary>
+    /// Body-frame linear (N·s) and angular (N·m·s, about the CoM) impulse the given on-times
+    /// deliver with this vehicle's actual thruster geometry. For HUD/diagnostics — flight
+    /// software never sees this; it has its own table.
+    /// </summary>
+    public void ImpulseFromOnTimes(float[] onTimes, out Vector3 linear, out Vector3 angular)
     {
-        if (_throttles == null || _throttles.Length != _thrusters.Length)
-            _throttles = new float[_thrusters.Length];
-        if (_externalThrottle == null || _externalThrottle.Length != _thrusters.Length)
-            _externalThrottle = new float[_thrusters.Length];
+        linear = angular = Vector3.zero;
+        if (onTimes == null) return;
+        Vector3 com = WorldCenterOfMass();
+        for (int i = 0; i < onTimes.Length && i < ThrusterCount; i++)
+        {
+            if (onTimes[i] <= 0f || !IsThrusterActive(i)) continue;
+            BodyGeometry(i, com, out Vector3 arm, out Vector3 dir);
+            float J = thrusterForce * onTimes[i];
+            linear  += dir * J;
+            angular += Vector3.Cross(arm, dir) * J;
+        }
+    }
+
+    // A valve command received inside FixedUpdate (lock-step path) opens in this physics
+    // step; one received from Update (free-running fallback) opens in the next one.
+    static float ValveStartTime() =>
+        Time.inFixedTimeStep ? Time.fixedTime : Time.fixedTime + Time.fixedDeltaTime;
+
+    void EnsureArrays()
+    {
+        int n = ThrusterCount;
+        if (_valveCloseTime == null || _valveCloseTime.Length != n)
+        {
+            _valveCloseTime = new float[n];
+            for (int i = 0; i < n; i++) _valveCloseTime[i] = -1f;
+        }
+        if (_throttles == null || _throttles.Length != n)
+            _throttles = new float[n];
+    }
+
+    // ── Geometry (for HUD impulse and regenerating the cFS thruster table) ─────
+
+    Vector3 WorldCenterOfMass()
+    {
+        if (_rb != null) return _rb.worldCenterOfMass;
+        // Edit mode: VehicleState applies its CoM override at Start, so use it directly.
+        if (vehicle != null && vehicle.centerOfMassOverride != Vector3.zero)
+            return vehicle.transform.TransformPoint(vehicle.centerOfMassOverride);
+        return transform.position;
+    }
+
+    // Body frame (this transform): moment arm from CoM, and the unit push direction.
+    void BodyGeometry(int i, Vector3 worldCoM, out Vector3 arm, out Vector3 dir)
+    {
+        Transform t = thrusterTransforms[i];
+        arm = transform.InverseTransformDirection(t.position - worldCoM);
+        dir = -transform.InverseTransformDirection(t.forward).normalized;
+    }
+
+    /// <summary>
+    /// Prints this scene's thruster geometry as the C initializer for cFS
+    /// apps/rcs/fsw/tables/rcs_thr_tbl.c — run after moving/re-canting any thruster so
+    /// flight software's table matches the hardware again.
+    /// </summary>
+    [ContextMenu("Log cFS thruster table (rcs_thr_tbl.c)")]
+    void LogCfsThrusterTable()
+    {
+        Vector3 com = WorldCenterOfMass();
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"[RCSModel] cFS RCS table rows (body frame, relative to CoM {transform.InverseTransformPoint(com):F3} local):");
+        for (int i = 0; i < ThrusterCount; i++)
+        {
+            if (thrusterTransforms[i] == null) continue;
+            BodyGeometry(i, com, out Vector3 r, out Vector3 d);
+            int enabled = (i >= 4 && IsThrusterActive(i)) ? 1 : 0; // T00-T03: deorbit, never for docking
+            sb.AppendLine($"        {{ {{ {r.x:+0.0000;-0.0000}f, {r.y:+0.0000;-0.0000}f, {r.z:+0.0000;-0.0000}f }}, " +
+                          $"{{ {d.x:+0.0000;-0.0000}f, {d.y:+0.0000;-0.0000}f, {d.z:+0.0000;-0.0000}f }}, {enabled} }}, /* T{i:D2} */");
+        }
+        Debug.Log(sb.ToString());
     }
 
     // ── Gizmos ───────────────────────────────────────────────────────────────

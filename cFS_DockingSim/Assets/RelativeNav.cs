@@ -18,8 +18,16 @@ public class RelativeNav : MonoBehaviour
     /// <summary>Distance between port faces in meters.</summary>
     public float range { get; private set; }
 
-    /// <summary>Positive = approaching, negative = receding (m/s).</summary>
+    /// <summary>Rate of closure along the docking axis (targetPort.forward), m/s. Positive = approaching.</summary>
     public float closingSpeed { get; private set; }
+
+    /// <summary>
+    /// Separation between the port faces measured along the docking axis (m). Positive = chaser
+    /// port still in front of the target port face, negative = past it. Unlike <see cref="range"/>
+    /// this excludes lateral offset — it's the quantity a real docking system's ready-to-capture
+    /// sensors respond to.
+    /// </summary>
+    public float axialGap { get; private set; }
 
     /// <summary>Perpendicular distance from the docking axis (meters).</summary>
     public float lateralOffset { get; private set; }
@@ -81,13 +89,19 @@ public class RelativeNav : MonoBehaviour
         // Closing speed derived from Rigidbody velocities — more stable than differencing range
         if (chaser != null && target != null && range > 0f)
         {
+            // Measured ALONG THE DOCKING AXIS, not along the port-to-port line of sight.
+            // Far out the two agree; within a few cm of contact with any lateral offset the
+            // line of sight swings sideways, so the old line-of-sight rate read ~0 while the
+            // ship was still closing axially (2026-09-26: 6.5 cm lateral at contact made
+            // closingSpeed hover at 0.000-0.003 m/s and fail DockingDetector's speed gate).
             Vector3 relVel = chaser.velocity - target.velocity;
-            closingSpeed = -Vector3.Dot(relVel, portDelta.normalized);
+            closingSpeed = -Vector3.Dot(relVel, targetPort.forward);
         }
 
         // Lateral offset: how far the chaser port is from the docking axis
         // Axis is defined by targetPort.forward (the approach corridor direction)
         float   axial      = Vector3.Dot(portDelta, targetPort.forward);
+        axialGap = axial;
         Vector3 lateralVec = portDelta - axial * targetPort.forward;
         lateralOffset  = lateralVec.magnitude;
         lateralOffsetX = lateralVec.x;

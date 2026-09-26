@@ -54,7 +54,7 @@ public class UdpTelemetrySender : MonoBehaviour
     void Start()
     {
         if (commandReceiver == null)
-            commandReceiver = FindFirstObjectByType<UdpCommandReceiver>();
+            commandReceiver = FindAnyObjectByType<UdpCommandReceiver>();
 
         try
         {

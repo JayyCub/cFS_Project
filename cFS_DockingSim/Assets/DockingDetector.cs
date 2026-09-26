@@ -1,10 +1,16 @@
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.Serialization;
 
 /// <summary>
 /// Monitors RelativeNav each physics step and declares a successful dock
-/// when all four conditions are simultaneously within threshold.
+/// when all capture conditions are simultaneously within threshold.
 /// Fires onDock once — future cFS telemetry handshake hooks in here.
+///
+/// The distance gate is the AXIAL gap between the port faces, not the 3-D port-to-port
+/// range: range includes lateral offset, so with maxRange 0.05 m and a legal 6.5 cm
+/// lateral offset, capture could never trigger even with the ports in contact
+/// (2026-09-26 run). Lateral misalignment is judged separately by maxLateralOffset.
 /// </summary>
 [DefaultExecutionOrder(-180)] // after RelativeNav, before UdpTelemetrySender
 public class DockingDetector : MonoBehaviour
@@ -12,7 +18,10 @@ public class DockingDetector : MonoBehaviour
     public RelativeNav nav;
 
     [Header("Docking Thresholds")]
-    public float maxRange         = 0.15f;  // meters
+    [Tooltip("Max separation between the port faces ALONG the docking axis (m) — the ready-to-capture " +
+             "distance. Lateral misalignment is checked separately by maxLateralOffset.")]
+    [FormerlySerializedAs("maxRange")]
+    public float maxAxialGap      = 0.05f;  // meters
     public float maxClosingSpeed  = 0.30f;  // m/s  (must also be > 0 — actually approaching)
     public float maxLateralOffset = 0.10f;  // meters
     public float maxAttitudeError = 10f;    // degrees
@@ -33,7 +42,7 @@ public class DockingDetector : MonoBehaviour
     {
         if (isDocked || nav == null) return;
 
-        bool rangeOk    = nav.range          <= maxRange;
+        bool gapOk      = nav.axialGap       <= maxAxialGap;
         bool speedOk    = nav.closingSpeed   >  0f && nav.closingSpeed <= maxClosingSpeed;
         bool lateralOk  = nav.lateralOffset  <= maxLateralOffset;
         bool attitudeOk = nav.attitudeError  <= maxAttitudeError;
@@ -47,17 +56,17 @@ public class DockingDetector : MonoBehaviour
         {
             _nextDiagLog = Time.time + diagnosticInterval;
             Debug.Log($"[DOCK] Approaching — " +
-                      $"Range:{nav.range:F3}m[{(rangeOk ? "OK" : "FAIL")}] " +
+                      $"Gap:{nav.axialGap:F3}m[{(gapOk ? "OK" : "FAIL")}] (range {nav.range:F3}) " +
                       $"Speed:{nav.closingSpeed:F3}m/s[{(speedOk ? "OK" : "FAIL")}] " +
                       $"Lateral:{nav.lateralOffset:F3}m[{(lateralOk ? "OK" : "FAIL")}] " +
                       $"Attitude:{nav.attitudeError:F1}°[{(attitudeOk ? "OK" : "FAIL")}] " +
                       $"Roll:{nav.rollError:F1}°[{(rollOk ? "OK" : "FAIL")}]");
         }
 
-        if (rangeOk && speedOk && lateralOk && attitudeOk && rollOk)
+        if (gapOk && speedOk && lateralOk && attitudeOk && rollOk)
         {
             isDocked = true;
-            Debug.Log($"[DOCK] SUCCESS — Range: {nav.range:F3} m | " +
+            Debug.Log($"[DOCK] SUCCESS — Gap: {nav.axialGap:F3} m (range {nav.range:F3}) | " +
                       $"Speed: {nav.closingSpeed:F3} m/s | " +
                       $"Lateral: {nav.lateralOffset:F3} m | " +
                       $"Attitude: {nav.attitudeError:F1}° | " +

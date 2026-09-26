@@ -113,12 +113,12 @@ public class UtilityPositionalPanel : MonoBehaviour
         if (_nav == null || Time.time < _nextRefresh) return;
         _nextRefresh = Time.time + _refreshInterval;
 
-        float tRange    = _detector != null ? _detector.maxRange         : 0.15f;
+        float tGap      = _detector != null ? _detector.maxAxialGap      : 0.05f;
         float tClosing  = _detector != null ? _detector.maxClosingSpeed  : 0.30f;
         float tLateral  = _detector != null ? _detector.maxLateralOffset : 0.10f;
         float tAttitude = _detector != null ? _detector.maxAttitudeError : 10f;
 
-        SetRow(_rangeVal,    $"{_nav.range:F2} m",                       _nav.range <= tRange);
+        SetRow(_rangeVal,    $"{_nav.range:F2} m",                       _nav.axialGap <= tGap);
         SetRow(_closingVal,  $"{_nav.closingSpeed:+0.000;-0.000} m/s",   _nav.closingSpeed > 0f && _nav.closingSpeed <= tClosing);
         SetRow(_lateralVal,  $"{_nav.lateralOffset:F3} m",               _nav.lateralOffset <= tLateral);
         SetRow(_attitudeVal, $"{_nav.attitudeError:F1} deg",             _nav.attitudeError <= tAttitude);

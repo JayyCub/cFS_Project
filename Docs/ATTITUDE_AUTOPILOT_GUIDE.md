@@ -72,7 +72,7 @@ Think about: where do your new fields go? What byte offset do they start at? Wha
 
 Find `GNC_APP_UnityTlm_t`. Add the corresponding fields to the struct. The order and types must match the order Unity writes them exactly — this is a raw memory copy over UDP, no serialization library.
 
-After changing the struct size, find in `gnc_app_udp.c` where the received packet size is validated (search for the `60` literal). Update it to match the new size. This is a critical coupling point — a mismatch will cause the recv task to silently discard every packet.
+After changing the struct, update `SIMLINK_SimState_t` in `sim_io/fsw/inc/simlink_icd.h` (its `_Static_assert` size) and `SimLinkProtocol.cs` together — see `Docs/SIMLINK_ICD.md`. SIM_IO rejects and counts (`RxBadFrame`) any frame whose size does not match, so a mismatch shows up in SIM_IO HK and a single EVS error instead of silently corrupting fields.
 
 ---
 
@@ -140,7 +140,7 @@ Think about how you will know it is working before committing to the full approa
 |------|------|
 | Computing attitude error | `RelativeNav.cs`, `DockingHUD.cs` |
 | Sending new fields | `UdpTelemetrySender.cs` (BuildPacket) |
-| Receiving new fields | `gnc_app.h` (UnityTlm_t), `gnc_app_udp.c` (size check) |
+| Receiving new fields | `simlink_icd.h` (SIMLINK_SimState_t), `SimLinkProtocol.cs` |
 | Control law | `gnc_app.c` (ComputeControl, Channel 3) |
 | New gains | `gnc_app_tbl.h`, `gnc_param_tbl.c` |
 | Watching output | EVS console, `DockingHUD.cs` (HUD display) |

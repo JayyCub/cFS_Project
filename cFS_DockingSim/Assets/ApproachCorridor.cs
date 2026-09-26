@@ -5,6 +5,7 @@ using UnityEngine;
 /// The chaser must stay within the cone angle for a valid approach.
 /// Draws a gizmo cone in the Scene view for visual reference.
 /// </summary>
+[DefaultExecutionOrder(-190)] // after RelativeNav, before UdpTelemetrySender
 public class ApproachCorridor : MonoBehaviour
 {
     [Header("References")]

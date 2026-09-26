@@ -1,74 +1,65 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading;
 using UnityEngine;
 
 /// <summary>
-/// Sends relative navigation telemetry to cFS over UDP at a fixed rate.
+/// SimLink lock-step master. Every GNC cycle (gncCycleSec of simulation time) it sends a
+/// SIM_STATE frame to cFS SIM_IO, then blocks this physics step until the WRENCH_CMD
+/// answering that frame comes back and is applied — so flight software runs on
+/// simulation time and every run with the same inputs is repeatable.
 ///
-/// Packet layout (80 bytes, all little-endian):
-///   [0]  float  MET_s               mission elapsed time
-///   [4]  float  Range_m
-///   [8]  float  ClosingSpeed_ms
-///   [12] float  LateralOffset_m
-///   [16] float  AttitudeError_deg
-///   [20] float  Pos_X               chaser transform origin, world frame — CW
-///                                    feedforward input; NOT docking-port-relative
-///   [24] float  Pos_Y
-///   [28] float  Pos_Z
-///   [32] float  Vel_X
-///   [36] float  Vel_Y
-///   [40] float  Vel_Z
-///   [44] float  AngVel_X
-///   [48] float  AngVel_Y
-///   [52] float  AngVel_Z
-///   [56] int32  Flags  (bit 0 = InCorridor, bit 1 = Docked)
-///   [60] float  PitchError_deg      per-axis attitude error [-180, 180]
-///   [64] float  YawError_deg
-///   [68] float  RollError_deg
-///   [72] float  LatOffset_X         docking-port-relative lateral offset, signed,
-///                                    in the target port's local right/up frame —
-///                                    what GNC's lateral controller actually steers on
-///   [76] float  LatOffset_Y
+/// If cFS doesn't answer within lockStepTimeoutMs the link drops to free-running (the sim
+/// keeps going, cFS commands are applied whenever they arrive) and re-engages automatically
+/// once cFS answers the previous cycle again. Frame format: SimLinkProtocol / Docs/SIMLINK_ICD.md.
 ///
-/// On the cFS side, declare a matching packed struct and read with CFE_SB or raw UDP.
+/// Execution order: runs after RelativeNav / ApproachCorridor / DockingDetector (so the
+/// state it sends is this step's) and before RCSModel (so a command applied here fires in
+/// this same step).
 /// </summary>
+[DefaultExecutionOrder(-100)]
 public class UdpTelemetrySender : MonoBehaviour
 {
     public RelativeNav      nav;
     public VehicleState     chaser;
     public ApproachCorridor corridor;
     public DockingDetector  detector;
+    [Tooltip("Command side of the link. Found automatically if left empty.")]
+    public UdpCommandReceiver commandReceiver;
 
     [Header("Network")]
     [Tooltip("IP address of the machine running cFS.")]
     public string targetIP   = "127.0.0.1";
     public int    targetPort = 5005;
 
-    [Header("Rate")]
-    [Tooltip("Telemetry packets per second sent to cFS.")]
-    public float sendRate = 10f;   // Hz — matches cFS scheduler default
+    [Header("Lock-step")]
+    [Tooltip("Simulation seconds per GNC cycle. Rounded to a whole number of physics steps; " +
+             "cFS reads the actual value from each frame's CycleDt_s.")]
+    public float gncCycleSec = 0.2f;
+    [Tooltip("Hold each GNC cycle until cFS answers it. Off = free-running (legacy behaviour).")]
+    public bool  lockStep = true;
+    [Tooltip("Real-time milliseconds to wait for cFS before dropping to free-running.")]
+    public int   lockStepTimeoutMs = 500;
+
+    /// <summary>Simulation time (s) since play started — the time base cFS sees.</summary>
+    public double SimTime       { get; private set; }
+    public uint   Seq           { get; private set; }
+    public bool   LockStepEngaged => _engaged;
 
     private UdpClient  udpClient;
     private IPEndPoint endpoint;
-    private float      missionTime;
-    private float      nextSend;
-
-    // Shared between main thread (writes) and send thread (reads)
-    private byte[]                 pendingPacket;
-    private readonly object        packetLock  = new object();
-    private ManualResetEventSlim   packetReady = new ManualResetEventSlim(false);
-    private Thread                 sendThread;
-    private volatile bool          running;
+    private int        stepInCycle;
+    private bool       _engaged;
 
     void Start()
     {
+        if (commandReceiver == null)
+            commandReceiver = FindFirstObjectByType<UdpCommandReceiver>();
+
         try
         {
             udpClient = new UdpClient();
             endpoint  = new IPEndPoint(IPAddress.Parse(targetIP), targetPort);
-            Debug.Log($"[UdpTelemetrySender] Sending to {targetIP}:{targetPort} at {sendRate} Hz");
         }
         catch (Exception e)
         {
@@ -77,102 +68,95 @@ public class UdpTelemetrySender : MonoBehaviour
             return;
         }
 
-        running    = true;
-        sendThread = new Thread(SendLoop) { IsBackground = true, Name = "UdpSendThread" };
-        sendThread.Start();
+        Debug.Log($"[UdpTelemetrySender] SimLink v{SimLinkProtocol.Version} → {targetIP}:{targetPort}, " +
+                  $"GNC cycle {StepsPerCycle * Time.fixedDeltaTime:F3}s ({StepsPerCycle} physics steps), " +
+                  $"lock-step {(lockStep ? "ON" : "OFF")}");
     }
+
+    int StepsPerCycle => Mathf.Max(1, Mathf.RoundToInt(gncCycleSec / Time.fixedDeltaTime));
 
     void FixedUpdate()
     {
-        missionTime += Time.fixedDeltaTime;
+        if (stepInCycle == 0)
+            RunCycleBoundary();
 
-        if (Time.time < nextSend) return;
-        nextSend = Time.time + 1f / sendRate;
+        stepInCycle = (stepInCycle + 1) % StepsPerCycle;
+        SimTime += Time.fixedDeltaTime;
+    }
 
+    void RunCycleBoundary()
+    {
         if (nav == null || chaser == null) return;
 
-        byte[] packet = BuildPacket();
-        lock (packetLock)
-            pendingPacket = packet;
-        packetReady.Set();
-    }
+        Seq++;
+        byte[] frame = SimLinkProtocol.BuildSimStateFrame(Seq, SimTime, BuildState());
+        try { udpClient.Send(frame, frame.Length, endpoint); }
+        catch (Exception e) { Debug.LogWarning($"[UdpTelemetrySender] Send error: {e.Message}"); }
 
-    // Background thread — wakes only when a new packet is staged, then fires it.
-    void SendLoop()
-    {
-        while (running)
+        if (!lockStep || commandReceiver == null)
         {
-            packetReady.Wait();
-            packetReady.Reset();
-
-            byte[] pkt = null;
-            lock (packetLock)
-            {
-                pkt           = pendingPacket;
-                pendingPacket = null;
-            }
-
-            if (pkt != null)
-            {
-                try { udpClient.Send(pkt, pkt.Length, endpoint); }
-                catch (Exception e)
-                {
-                    Debug.LogWarning($"[UdpTelemetrySender] Send error: {e.Message}");
-                }
-            }
+            SetEngaged(false, null);
+            return;
         }
+
+        // Engage once cFS has answered the previous cycle — proof it's alive and keeping up.
+        if (!_engaged && Seq > 1 && commandReceiver.LatestSeq == Seq - 1)
+            SetEngaged(true, $"cFS answering — lock-step ENGAGED at Seq {Seq}");
+
+        if (_engaged && !commandReceiver.WaitForCommand(Seq, lockStepTimeoutMs))
+            SetEngaged(false, $"no cFS answer to Seq {Seq} within {lockStepTimeoutMs} ms — " +
+                              "lock-step DISENGAGED, sim free-running until cFS catches up");
     }
 
-    byte[] BuildPacket()
+    void SetEngaged(bool engaged, string why)
     {
-        Vector3 pos    = chaser.position;
-        Vector3 vel    = chaser.velocity;
-        // Convert world-frame angular velocity to the chaserPort's local frame so it
-        // matches the body-frame sign convention of pitchError/yawError/rollError.
-        Vector3 angVel = nav != null && nav.chaserPort != null
+        if (engaged != _engaged && why != null)
+        {
+            if (engaged) Debug.Log($"[UdpTelemetrySender] {why}");
+            else         Debug.LogWarning($"[UdpTelemetrySender] {why}");
+        }
+        _engaged = engaged;
+        if (commandReceiver != null)
+            commandReceiver.LockStepEngaged = engaged;
+    }
+
+    SimLinkProtocol.SimState BuildState()
+    {
+        VehicleState target = nav.target;
+        Vector3 relPos = target != null ? chaser.position - target.position : chaser.position;
+        Vector3 relVel = target != null ? chaser.velocity - target.velocity : chaser.velocity;
+
+        // World-frame angular velocity → chaserPort frame, matching the body-frame sign
+        // convention of pitchError/yawError/rollError.
+        Vector3 angVel = nav.chaserPort != null
             ? nav.chaserPort.InverseTransformDirection(chaser.angularVelocity)
             : chaser.angularVelocity;
 
-        bool inCorridor = corridor != null && corridor.inCorridor;
-        bool docked     = detector != null && detector.isDocked;
-        int  flags      = (inCorridor ? 1 : 0) | (docked ? 2 : 0);
+        uint flags = 0;
+        if (corridor != null && corridor.inCorridor) flags |= SimLinkProtocol.FlagInCorridor;
+        if (detector != null && detector.isDocked)   flags |= SimLinkProtocol.FlagDocked;
 
-        byte[] buf = new byte[80];
-        int    off = 0;
-
-        void WriteFloat(float v) { Buffer.BlockCopy(BitConverter.GetBytes(v), 0, buf, off, 4); off += 4; }
-        void WriteInt(int v)     { Buffer.BlockCopy(BitConverter.GetBytes(v), 0, buf, off, 4); off += 4; }
-
-        WriteFloat(missionTime);
-        WriteFloat(nav.range);
-        WriteFloat(nav.closingSpeed);
-        WriteFloat(nav.lateralOffset);
-        WriteFloat(nav.attitudeError);
-        WriteFloat(pos.x);
-        WriteFloat(pos.y);
-        WriteFloat(pos.z);
-        WriteFloat(vel.x);
-        WriteFloat(vel.y);
-        WriteFloat(vel.z);
-        WriteFloat(angVel.x);
-        WriteFloat(angVel.y);
-        WriteFloat(angVel.z);
-        WriteInt(flags);
-        WriteFloat(nav.pitchError);
-        WriteFloat(nav.yawError);
-        WriteFloat(nav.rollError);
-        WriteFloat(nav.lateralOffsetX);
-        WriteFloat(nav.lateralOffsetY);
-
-        return buf;
+        return new SimLinkProtocol.SimState
+        {
+            CycleDt_s         = StepsPerCycle * Time.fixedDeltaTime,
+            Range_m           = nav.range,
+            ClosingSpeed_ms   = nav.closingSpeed,
+            LateralOffset_m   = nav.lateralOffset,
+            AttitudeError_deg = nav.attitudeError,
+            RelPos            = relPos,
+            RelVel            = relVel,
+            AngVel            = angVel,
+            Flags             = flags,
+            PitchError_deg    = nav.pitchError,
+            YawError_deg      = nav.yawError,
+            RollError_deg     = nav.rollError,
+            LatOffset_X       = nav.lateralOffsetX,
+            LatOffset_Y       = nav.lateralOffsetY,
+        };
     }
 
     void OnDestroy()
     {
-        running = false;
-        packetReady.Set();   // unblock the send thread so it can exit
-        sendThread?.Join(200);
         udpClient?.Close();
-        packetReady.Dispose();
     }
 }

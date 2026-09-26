@@ -4,6 +4,7 @@ using UnityEngine;
 /// Computes approach navigation state between two docking ports each physics step.
 /// All other Phase 2+ components (DockingDetector, DockingHUD, cFS telemetry) read from here.
 /// </summary>
+[DefaultExecutionOrder(-200)] // before ApproachCorridor, DockingDetector, UdpTelemetrySender read it
 public class RelativeNav : MonoBehaviour
 {
     [Header("Vehicles")]

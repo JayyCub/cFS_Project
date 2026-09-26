@@ -13,13 +13,13 @@ Unity (Mac)                                  cFS (Docker)
 ───────────────────────────────────          ─────────────────────────────────
 RelativeNav.cs   → builds nav state          gnc_app.c    → SelectPhase()
 VehicleState.cs  → Rigidbody wrapper                      → ComputeControl()
-RCSModel.cs      → 16 physical thrusters     gnc_app_udp.c→ SendCommand()
+RCSModel.cs      → 16 physical thrusters     sim_io       → SimLink UDP ⇄ Software Bus
 ThrusterAllocator.cs → wrench → thrusters    gnc_app.h    → all types/constants
 ClohessyWiltshire.cs → orbital drift         gnc_app_tbl.h→ tunable gains
                       ←──────────────────────────────────
-                         telemetry (port 5005, 10 Hz, 72 bytes)
+                         SIM_STATE (port 5005, 5 Hz sim time, 108 B)
                       ──────────────────────────────────→
-                         wrench command (port 5006, 1 Hz, 32 bytes)
+                         WRENCH_CMD (port 5006, answers each SIM_STATE — lock-step, 60 B)
 ```
 
 **GNC runs at 1 Hz inside cFS. Unity runs physics at 50 Hz. `GNC_APP_ComputeControl()` outputs a body-frame wrench `[Fx,Fy,Fz,Tx,Ty,Tz]` plus one shared burn duration; Unity's `ThrusterAllocator` maps that wrench onto individual thrusters via a pseudo-inverse, and each fires for the exact duration cFS computed — cFS never sends a stop packet.**
@@ -33,7 +33,7 @@ ClohessyWiltshire.cs → orbital drift         gnc_app_tbl.h→ tunable gains
 | File | What it does | Edit when |
 |------|-------------|-----------|
 | `cFS/apps/gnc_app/fsw/src/gnc_app.c` | Phase state machine, control law, wakeup handler | Adding phases, changing guidance logic |
-| `cFS/apps/gnc_app/fsw/src/gnc_app_udp.c` | Background telemetry recv task; `SendCommand()` (packs the wrench) | Changing packet format or network topology |
+| `cFS/apps/sim_io/` | Device I/O app — owns the Unity sockets, SimLink framing, lock-step `SIM_STATE`/`WRENCH_CMD` SB messages | Changing packet format or network topology (see `Docs/SIMLINK_ICD.md`) |
 | `cFS/apps/gnc_app/fsw/src/gnc_app.h` | All enums, structs, constants, function prototypes | Adding new state, message IDs, or event IDs |
 | `cFS/apps/gnc_app/fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` — 24 tunable gain/physical-constant fields | Adding new gains you want in the table |
 | `cFS/apps/gnc_app/fsw/tables/gnc_param_tbl.c` | Default values for the gain table | Changing defaults at compile time |
@@ -51,8 +51,8 @@ ClohessyWiltshire.cs → orbital drift         gnc_app_tbl.h→ tunable gains
 | `cFS_DockingSim/Assets/DockingDetector.cs` | Latches `isDocked` when 4 thresholds met; fires `onDock` event | Changing docking contact thresholds |
 | `cFS_DockingSim/Assets/RateDamping.cs` | Proportional rate-null controller (H key toggle); suppressed when cFS has authority | Changing attitude hold behavior |
 | `cFS_DockingSim/Assets/ThrusterDiagnostic.cs` | F8 automated per-group calibration (delta-V/delta-omega logging) | Re-measuring `BrakeAccel_*_mss` / `ApproachAccel_mss` |
-| `cFS_DockingSim/Assets/UdpTelemetrySender.cs` | Packs and sends 72-byte telemetry struct | Adding telemetry fields |
-| `cFS_DockingSim/Assets/UdpCommandReceiver.cs` | Receives 32-byte wrench command; calls `SetWrenchCommand()` | Changing command format or timeout |
+| `cFS_DockingSim/Assets/UdpTelemetrySender.cs` | Lock-step master: sends `SIM_STATE` each GNC cycle, waits for the answer | Adding telemetry fields, cycle rate |
+| `cFS_DockingSim/Assets/UdpCommandReceiver.cs` | Validates `WRENCH_CMD` frames; applies them via `SetWrenchCommand()` | Changing command format or timeout |
 
 ---
 
@@ -193,47 +193,20 @@ Skipped entirely when all three axis errors are within a deadband **and** the ve
 
 ---
 
-## UDP Interface
+## UDP Interface (SimLink v2)
 
-### Telemetry packet — Unity → cFS (72 bytes, little-endian, port 5005, 10 Hz)
+The byte-level layouts, framing, CRC and lock-step protocol are defined in **[SIMLINK_ICD.md](SIMLINK_ICD.md)**. Short version:
 
-| Bytes | Field | Type | Notes |
-|-------|-------|------|-------|
-| 0–3 | MET_s | float | Mission elapsed time |
-| 4–7 | Range_m | float | Port-to-port distance |
-| 8–11 | ClosingSpeed_ms | float | Positive = approaching |
-| 12–15 | LateralOffset_m | float | Perpendicular from docking axis |
-| 16–19 | AttitudeError_deg | float | Scalar port alignment angle |
-| 20–31 | Pos_X/Y/Z | float×3 | Chaser position (LVLH) |
-| 32–43 | Vel_X/Y/Z | float×3 | Chaser velocity (LVLH) |
-| 44–55 | AngVel_X/Y/Z | float×3 | Chaser angular velocity (rad/s) |
-| 56–59 | Flags | int32 | bit0=InCorridor, bit1=Docked |
-| 60–63 | PitchError_deg | float | Per-axis attitude error, [-180, 180] |
-| 64–67 | YawError_deg | float | |
-| 68–71 | RollError_deg | float | |
-
-### Wrench command packet — cFS → Unity (32 bytes, little-endian, port 5006, 1 Hz)
-
-| Bytes | Field | Type | Notes |
-|-------|-------|------|-------|
-| 0–3 | Fx | float | N, body-frame force |
-| 4–7 | Fy | float | N |
-| 8–11 | Fz | float | N |
-| 12–15 | Tx | float | N·m, body-frame torque |
-| 16–19 | Ty | float | N·m |
-| 20–23 | Tz | float | N·m |
-| 24–27 | Duration_s | float | Seconds each fired thruster fires |
-| 28–31 | GncPhase | int32 | `GNC_Phase_t` value (0=IDLE, 1=CORRECT, 2=APPROACH, 3=DOCKED, 4=HOLD) |
-
-A zero wrench (all six components 0.0) with any duration is a coast/heartbeat command. Unity's `ThrusterAllocator` pseudo-inverse maps the wrench to the 16 physical thrusters, binary on/off per thruster (Draco thrusters are full-thrust-or-off, not throttleable).
-
-**Timeout:** If Unity receives no command for 1.5 s, `UdpCommandReceiver.cs` calls `ClearExternalControl()` and keyboard input resumes. This is a safety fallback, not a normal operating mode.
+- Unity sends a 108-byte `SIM_STATE` frame to port 5005 once per GNC cycle (0.2 s of sim time), then holds that physics step.
+- cFS `sim_io` validates the frame and publishes it on the Software Bus. `gnc_app` runs one cycle and publishes `WRENCH_CMD`, and `sim_io` frames it back to Unity on port 5006 with the same Seq.
+- Unity applies the command in the same physics step and continues. With no answer within 500 ms it drops to free-running, and it re-engages automatically.
+- If no command arrives for 3 s, `UdpCommandReceiver` clears cFS authority and zeros the thrusters.
 
 ---
 
 ## Tunable Parameters (Parameter Table)
 
-All gains live in `GNC_ParamTbl_t` (defined in `gnc_app_tbl.h`, 24 floats / 96 bytes). Defaults are in `gnc_param_tbl.c` and compiled to `/cf/gnc_param_tbl.tbl`. The `ProcessWakeup` loop calls `CFE_TBL_Manage` every second; you can uplink a new table image to a running cFS without restart.
+All gains live in `GNC_ParamTbl_t` (defined in `gnc_app_tbl.h`, 24 floats / 96 bytes). Defaults are in `gnc_param_tbl.c` and compiled to `/cf/gnc_param_tbl.tbl`. The `ProcessSimState` cycle calls `CFE_TBL_Manage` every cycle; you can uplink a new table image to a running cFS without restart.
 
 | Field | Default | Units | Role |
 |-------|---------|-------|------|
@@ -301,8 +274,7 @@ These values must be consistent across both codebases. A mismatch causes silent 
 | Mean motion 0.00113 rad/s | `GNC_CW_MEAN_MOTION` in `gnc_app.h` | `ClohessyWiltshire.meanMotion` |
 | Approach corridor half-angle 15° | `ParamTbl.ConeHalfAngle_deg` | `ApproachCorridor.coneHalfAngle` |
 | Brake threshold | `BrakeAccel_Hard_mss` / `BrakeAccel_Light_mss` × `VehicleMass` | `RCSModel.SoftBrakeThreshold_N` (938 N) |
-| Telemetry packet layout | `GNC_APP_UnityTlm_t` struct in `gnc_app.h` | `UdpTelemetrySender.BuildPacket()` |
-| Command packet layout | `GNC_APP_SendCommand()` in `gnc_app_udp.c` | `UdpCommandReceiver.Update()` |
+| SimLink frame layouts | `simlink_icd.h` (sim_io) — static-asserted sizes | `SimLinkProtocol.cs` |
 
 When changing any value on this list, update both locations in the same commit — there is no runtime sync between the two codebases (they're separate processes talking over UDP), so a mismatch fails silently as systematically wrong burn durations or corridor geometry rather than a compile/load error.
 
@@ -320,7 +292,7 @@ Edit `AxialKp`, `MaxCloseSpeed` (outer cap), and/or `MaxCloseSpeed_Inner` (inner
 2. Add transition logic in `GNC_APP_SelectPhase()` in `gnc_app.c`
 3. Add a case in `GNC_APP_ComputeControl()` to define the control law for that phase
 4. Add an EVS event ID and string for the phase transition in `gnc_app.h`
-5. Update the `PHASE_NAMES[]` array in `GNC_APP_ProcessWakeup()` and the `GncPhase` doc comment in `UdpCommandReceiver.cs`
+5. Update the `PHASE_NAMES[]` array in `GNC_APP_ProcessSimState()` and the `GncPhase` doc comment in `UdpCommandReceiver.cs`
 
 ### Add a new ground command
 
@@ -331,9 +303,9 @@ Edit `AxialKp`, `MaxCloseSpeed` (outer cap), and/or `MaxCloseSpeed_Inner` (inner
 
 ### Add a new telemetry field to the nav packet
 
-1. Add the field to `GNC_APP_UnityTlm_t` in `gnc_app.h` (keep it `__attribute__((packed))`)
-2. Update `UdpTelemetrySender.BuildPacket()` in Unity to write the new field at the correct byte offset
-3. Update the expected packet size check in `GNC_APP_UdpRecvTask()` (`gnc_app_udp.c`) if the total size changes
+1. Add the field to `SIMLINK_SimState_t` in `sim_io/fsw/inc/simlink_icd.h` and update its size `_Static_assert`
+2. Mirror it in `SimLinkProtocol.SimState` + `BuildSimStateFrame()` (same order), set it in `UdpTelemetrySender.BuildState()`
+3. Update `SimStateBytes` in `SimLinkProtocol.cs` and the table in `Docs/SIMLINK_ICD.md` — SIM_IO rejects any frame whose size or CRC does not match
 4. Update `TelemetryLogger.cs` CSV columns if you want it logged
 
 ### Enable / retune autonomous hold waypoints

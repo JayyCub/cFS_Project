@@ -34,7 +34,7 @@ This project maps that architecture to accessible tools:
 | EVS event log (downlinked to ground) | cFS EVS messages printed to the operator console |
 | Dragon hold-and-proceed waypoints | Abort latch + GO/HOLD/ABORT command interface |
 
-Clohessy-Wiltshire differential gravity equations run continuously in Unity, producing the relative-motion drift a real chaser would experience at ISS altitude (n = 0.00113 rad/s). The GNC computes a feedforward delta-v each 1 Hz cycle that cancels this drift before it accumulates, the same technique real rendezvous GNC uses.
+Clohessy-Wiltshire differential gravity equations run continuously in Unity, producing the relative-motion drift a real chaser would experience at ISS altitude (n = 0.00113 rad/s). The GNC computes a feedforward delta-v each lock-step cycle that cancels this drift before it accumulates, the same technique real rendezvous GNC uses.
 
 ---
 
@@ -44,20 +44,20 @@ Clohessy-Wiltshire differential gravity equations run continuously in Unity, pro
 ┌─────────────────────────────────────┐        ┌───────────────────────────────────┐
 │           Unity (Mac)               │        │       cFS (Docker container)      │
 │                                     │        │                                   │
-│  ┌──────────────────────────────┐   │        │  ┌──────────────────────────────┐ │
-│  │  Physics Simulation          │   │  UDP   │  │  gnc_app (custom C app)      │ │
-│  │  6-DOF dynamics              │   │ telemetry │  SelectPhase()               │ │
-│  │  Clohessy-Wiltshire drift    │───────────>│  │  ComputeControl()            │ │
-│  │  16-thruster RCS model       │   │  10 Hz │  │  SendCommand()               │ │
-│  │  Docking corridor / detector │   │ port 5005 │  1 Hz wakeup (SCH_LAB)       │ │
-│  └──────────────────────────────┘   │        │  └──────────────────────────────┘ │
-│                                     │        │              │                    │
-│  ┌──────────────────────────────┐   │  UDP   │  ┌──────────────────────────────┐ │
-│  │  UdpCommandReceiver          │<───────────│  │  gnc_app_udp (OSAL task)     │ │
-│  │  Feeds wrench to             │   │ wrench │  │  Recv telemetry (port 5005)  │ │
-│  │  ThrusterAllocator           │   │ command│  │  Send wrench cmds (port 5006)│ │
-│  │  (pseudo-inverse allocator)  │   │ port 5006 │                              │ │
-│  └──────────────────────────────┘   │        │  └──────────────────────────────┘ │
+│  ┌──────────────────────────────┐   │ SimLink│  ┌──────────────────────────────┐ │
+│  │  Physics Simulation          │   │  UDP   │  │  sim_io (device I/O app)     │ │
+│  │  6-DOF dynamics              │ SIM_STATE  │  │  only app that owns sockets  │ │
+│  │  Clohessy-Wiltshire drift    │───────────>│  │  validates SimLink frames    │ │
+│  │  16-thruster RCS model       │ port 5005 │  └──────┬───────────────▲───────┘ │
+│  │  Docking corridor / detector │   │        │     SIM_STATE (SB)  WRENCH_CMD (SB)│
+│  │  UdpTelemetrySender =        │   │        │  ┌──────▼───────────────┴───────┐ │
+│  │    lock-step master          │   │        │  │  gnc_app (custom C app)      │ │
+│  └──────────────────────────────┘   │        │  │  runs once per SIM_STATE     │ │
+│  ┌──────────────────────────────┐   │        │  │  SelectPhase()               │ │
+│  │  UdpCommandReceiver          │<───────────│  │  ComputeControl()            │ │
+│  │  applies wrench in the same  │ WRENCH_CMD │  └──────────────────────────────┘ │
+│  │  physics step (lock-step)    │ port 5006 │  SCH_LAB: 1 Hz HK requests only    │
+│  └──────────────────────────────┘   │        │                                   │
 └─────────────────────────────────────┘        └───────────────────────────────────┘
                                                                ^
                                                                │ CCSDS commands
@@ -74,7 +74,7 @@ The cFS→Unity command packet carries a body-frame wrench `[Fx, Fy, Fz, Tx, Ty,
 
 ### GNC Application (cFS / C)
 
-`gnc_app` is a standard cFS application written in C that runs inside NASA's Core Flight Executive (cFE). It subscribes to the SCH\_LAB scheduler wakeup message and runs its guidance loop at 1 Hz.
+`gnc_app` is a standard cFS application written in C that runs inside NASA's Core Flight Executive (cFE). It owns no sockets: it runs one guidance cycle for every `SIM_STATE` message that the `sim_io` app publishes on the Software Bus. That is 5 Hz of simulation time, in lock-step with Unity. It publishes its command back as a `WRENCH_CMD` Software Bus message.
 
 **Phase state machine** (modeled on Dragon RPOD):
 
@@ -102,9 +102,9 @@ duration = Δv_needed / thruster_accel     (thruster_accel = F/m = 400 N / 4500 
 
 **Safety features:**
 
-- **Abort latch**: the system starts guidance-inhibited and requires an explicit GO command before any thrust fires. An ABORT command sets the latch and sends an immediate coast packet to Unity, stopping any active burn without waiting for the next 1 Hz wakeup. Guidance stays inhibited until GO is sent again.
+- **Abort latch**: the system starts guidance-inhibited and requires an explicit GO command before any thrust fires. An ABORT command sets the latch, and the next lock-step cycle commands zero thrust. Loss of the sim link for `TlmLossTimeoutSec` latches the same state automatically. Guidance stays inhibited until GO is sent again.
 - **CCSDS command dispatch**: all ground commands arrive as properly-formatted CCSDS packets (NOOP, RESET\_COUNTERS, HOLD, GO, ABORT). Unknown function codes and malformed packet lengths generate EVS error events.
-- **CFE\_TBL parameter management**: all GNC gains live in a `CFE_TBL`-managed struct (`GNC_ParamTbl_t`) rather than compiled `#define` constants. Parameters can be changed by uplink to a running cFS instance without recompile or restart. The `ProcessWakeup` cycle calls `CFE_TBL_Manage` every 1 Hz to pick up newly activated table images.
+- **CFE\_TBL parameter management**: all GNC gains live in a `CFE_TBL`-managed struct (`GNC_ParamTbl_t`) rather than compiled `#define` constants. Parameters can be changed by uplink to a running cFS instance without recompile or restart. The `ProcessSimState` cycle calls `CFE_TBL_Manage` every cycle to pick up newly activated table images.
 - **LC safety monitoring**: limit-checker watchpoints on closing speed, lateral offset, and telemetry staleness fire an automatic ABORT (via the SC stored-commands app) if any threshold is exceeded.
 
 See [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) for the full control-law channel breakdown and parameter table, or [Docs/PROJECT.md](Docs/PROJECT.md) for the phase-by-phase build history.
@@ -113,8 +113,9 @@ See [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) for the full control-law chan
 
 | File | Purpose |
 |------|---------|
-| `cFS/apps/gnc_app/fsw/src/gnc_app.c` | Main task, Init, ProcessWakeup, SelectPhase, ComputeControl |
-| `cFS/apps/gnc_app/fsw/src/gnc_app_udp.c` | Background OSAL recv task; `GNC_APP_SendCommand()` (packs the wrench) |
+| `cFS/apps/gnc_app/fsw/src/gnc_app.c` | Main task, Init, ProcessSimState, SendHk, SelectPhase, ComputeControl, PublishCommand |
+| `cFS/apps/sim_io/fsw/src/sim_io*.c` | Device I/O app: SimLink UDP rx child task → `SIM_STATE` on SB; `WRENCH_CMD` from SB → UDP |
+| `cFS/apps/sim_io/fsw/inc/simlink_icd.h` | SimLink wire format (mirrors `SimLinkProtocol.cs`) — see [Docs/SIMLINK_ICD.md](Docs/SIMLINK_ICD.md) |
 | `cFS/apps/gnc_app/fsw/src/gnc_app.h` | All type definitions, constants, `GNC_APP_Data_t` |
 | `cFS/apps/gnc_app/fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` struct (24 gain/physical-constant fields) |
 | `cFS/apps/gnc_app/fsw/tables/gnc_param_tbl.c` | Default gain values; builds to `/cf/gnc_param_tbl.tbl` |
@@ -137,37 +138,11 @@ Unity 6 runs the physics and renders the scene. It applies forces and integrates
 
 `ThrusterAllocator.cs` builds a 6×N effectiveness matrix at startup and computes its pseudo-inverse once (Gauss-Jordan). `RCSModel.SetWrenchCommand(Vector3 force, Vector3 torque, float duration)` — the cFS integration hook — runs that pseudo-inverse to map a desired 6-DOF wrench onto individual thruster on/off states (Draco thrusters are binary: full thrust or off). Unity auto-cuts each thruster at `burnEndTime`, so cFS never sends a stop packet.
 
-**Telemetry and commands:**
+**Telemetry and commands (SimLink v2, lock-step):**
 
-`UdpTelemetrySender.cs` sends a 72-byte telemetry packet to cFS at 10 Hz on a background thread. `UdpCommandReceiver.cs` listens on port 5006 for 32-byte wrench command packets and calls `SetWrenchCommand`. If no command arrives within 1.5 seconds, the keyboard regains control.
+`UdpTelemetrySender.cs` is the lock-step master. Every GNC cycle (0.2 s of *simulation* time) it sends a `SIM_STATE` frame to cFS, then holds that physics step until the `WRENCH_CMD` answering it arrives. `UdpCommandReceiver.cs` applies that command in the same step. Flight software therefore runs on simulation time: runs are repeatable, and a slow frame or a paused editor never desynchronizes the two sides. If cFS doesn't answer within 500 ms, Unity drops to free-running and re-engages automatically once cFS catches up.
 
-**UDP packet format:**
-
-Telemetry (Unity to cFS, 72 bytes):
-
-| Field | Type | Offset |
-|-------|------|--------|
-| MET\_s | float | 0 |
-| Range\_m | float | 4 |
-| ClosingSpeed\_ms | float | 8 |
-| LateralOffset\_m | float | 12 |
-| AttitudeError\_deg | float | 16 |
-| Pos\_X/Y/Z | float×3 | 20 |
-| Vel\_X/Y/Z | float×3 | 32 |
-| AngVel\_X/Y/Z | float×3 | 44 |
-| Flags (bit0=InCorridor, bit1=Docked) | int32 | 56 |
-| PitchError\_deg / YawError\_deg / RollError\_deg | float×3 | 60 |
-
-Command (cFS to Unity, 32 bytes):
-
-| Field | Type | Offset |
-|-------|------|--------|
-| Fx / Fy / Fz | float×3 | 0 |
-| Tx / Ty / Tz | float×3 | 12 |
-| BurnDuration\_s | float | 24 |
-| GncPhase | int32 | 28 |
-
-A zero wrench with any duration is a coast/heartbeat command. See [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) for the full UDP interface reference.
+Frames carry a sync word, version, sequence number, sim time and CRC-16. Corrupt or mismatched frames are dropped and counted, never applied. The full byte layout is in [Docs/SIMLINK_ICD.md](Docs/SIMLINK_ICD.md).
 
 ---
 
@@ -276,12 +251,12 @@ cFS_Project/
 │   ├── apps/
 │   │   └── gnc_app/                  ← custom GNC flight software application
 │   │       └── fsw/
-│   │           ├── src/              ← gnc_app.c, gnc_app.h, gnc_app_udp.c
+│   │           ├── src/              ← gnc_app.c, gnc_app.h (no sockets — SB only)
 │   │           ├── inc/              ← gnc_app_tbl.h, gnc_app_msgids.h
 │   │           └── tables/           ← gnc_param_tbl.c (default gain table)
 │   └── sample_defs/
 │       └── tables/
-│           └── sch_lab_table.c       ← 10 Hz tick; GNC wakeup at 1 Hz
+│           └── sch_lab_table.c       ← 10 Hz tick; 1 Hz HK requests (GNC cycle is lock-step on SIM_STATE)
 └── cFS_DockingSim/                   ← Unity 6 project
     └── Assets/
         ├── VehicleState.cs           ← Rigidbody wrapper; auto-computed inertia tensor

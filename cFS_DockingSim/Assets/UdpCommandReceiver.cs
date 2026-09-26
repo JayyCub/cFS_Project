@@ -5,33 +5,29 @@ using System.Threading;
 using UnityEngine;
 
 /// <summary>
-/// Receives wrench commands from cFS over UDP and forwards them to RCSModel (Phase 6-4+).
+/// Receives SimLink WRENCH_CMD frames from cFS (SIM_IO app) and applies them to RCSModel.
+/// See SimLinkProtocol / Docs/SIMLINK_ICD.md for the frame format.
 ///
-/// Command packet layout (32 bytes, little-endian):
-///   bytes [ 0- 3]  float  Fx  N    body-frame force
-///   bytes [ 4- 7]  float  Fy  N
-///   bytes [ 8-11]  float  Fz  N
-///   bytes [12-15]  float  Tx  N·m  body-frame torque
-///   bytes [16-19]  float  Ty  N·m
-///   bytes [20-23]  float  Tz  N·m
-///   bytes [24-27]  float  Duration_s
-///   bytes [28-31]  int32  GncPhase  (0=IDLE, 1=CORRECT, 2=APPROACH, 3=DOCKED, 4=HOLD)
+/// Two ways a command gets applied:
+///   • Lock-step (normal): UdpTelemetrySender sends SIM_STATE with Seq N, then calls
+///     WaitForCommand(N) from FixedUpdate, which blocks until the command answering N
+///     arrives and applies it in that same physics step — deterministic timing.
+///   • Free-running (cFS not keeping up / not running): Update() applies whatever newest
+///     command has arrived, like the pre-lock-step link did.
 ///
-/// A zero wrench (Fx=Fy=Fz=Tx=Ty=Tz=0) with any duration is a coast/heartbeat —
-/// resets the cFS timeout without firing any thrusters.
-/// RCSModel.SetWrenchCommand() runs the pseudo-inverse allocator to map the wrench
-/// to physical thruster firings.
+/// Every frame is validated (sync, version, type, length, CRC) on the receive thread;
+/// corrupt frames are counted and dropped, never applied.
 /// </summary>
 public class UdpCommandReceiver : MonoBehaviour
 {
     public RCSModel rcsModel;
 
     [Header("Network")]
-    [Tooltip("Port this script listens on (cFS sends commands here).")]
+    [Tooltip("Port this script listens on (cFS SIM_IO sends commands here).")]
     public int listenPort = 5006;
 
     [Header("Timeout")]
-    [Tooltip("Seconds without a command before reverting to keyboard control.")]
+    [Tooltip("Seconds without a command before cFS authority is dropped and thrusters are cleared.")]
     public float commandTimeoutSec = 3.0f;
 
     [Header("Debug")]
@@ -41,14 +37,14 @@ public class UdpCommandReceiver : MonoBehaviour
     private Thread        recvThread;
     private volatile bool running;
 
-    // Producer (recv thread) writes these then sets hasPendingCmd.
-    // The volatile write to hasPendingCmd acts as a release fence, so the
-    // main thread always sees a consistent wrench snapshot when it reads them.
-    private volatile float pendingFx, pendingFy, pendingFz;
-    private volatile float pendingTx, pendingTy, pendingTz;
-    private volatile float pendingDuration;
-    private volatile int   pendingPhase = -1;
-    private volatile bool  hasPendingCmd;
+    // Newest valid command from the recv thread. Guarded by _lock; Monitor.PulseAll
+    // on arrival wakes a lock-step WaitForCommand.
+    private readonly object              _lock = new object();
+    private SimLinkProtocol.WrenchCmd?   _latest;
+    private uint                         _lastAppliedSeq;
+    private bool                         _haveApplied;
+
+    private int _rxGood, _rxBad;   // Interlocked from the recv thread
 
     private float lastCmdTime;
     private bool  cfsActive;
@@ -57,24 +53,31 @@ public class UdpCommandReceiver : MonoBehaviour
     public bool CfsActive => cfsActive;
 
     /// <summary>
-    /// Most recent GNC phase received from cFS (GNC_Phase_t: 0=IDLE, 1=CORRECT,
-    /// 2=APPROACH, 3=DOCKED, 4=HOLD). -1 if no phase data received yet.
+    /// Set by UdpTelemetrySender while lock-step is engaged — commands are then applied
+    /// only through WaitForCommand, never asynchronously from Update().
     /// </summary>
+    public bool LockStepEngaged { get; set; }
+
+    /// <summary>Most recent GNC phase (GNC_Phase_t: 0=IDLE … 4=HOLD); -1 before any command.</summary>
     public int GncPhase { get; private set; } = -1;
 
-    /// <summary>Last wrench actually applied via SetWrenchCommand (for HUD/debug display).
-    /// Zeroed on command timeout so a stale nonzero value never lingers after cFS
-    /// disconnects. Main-thread-only, same as GncPhase — the recv thread never touches these.</summary>
+    /// <summary>Last wrench actually applied (for HUD/debug). Zeroed on command timeout.</summary>
     public Vector3 LastForce    { get; private set; }
     public Vector3 LastTorque   { get; private set; }
     public float   LastDuration { get; private set; }
+
+    public int FramesGood => _rxGood;
+    public int FramesBad  => _rxBad;
+
+    /// <summary>Seq of the newest valid command received (0 if none yet).</summary>
+    public uint LatestSeq { get { lock (_lock) return _latest?.Seq ?? 0; } }
 
     void Start()
     {
         try
         {
             listener = new UdpClient(listenPort);
-            Debug.Log($"[UdpCommandReceiver] Listening on port {listenPort}");
+            Debug.Log($"[UdpCommandReceiver] Listening for SimLink v{SimLinkProtocol.Version} commands on port {listenPort}");
         }
         catch (Exception e)
         {
@@ -90,25 +93,31 @@ public class UdpCommandReceiver : MonoBehaviour
 
     void ReceiveLoop()
     {
-        IPEndPoint remote = new IPEndPoint(IPAddress.Any, 0);
+        IPEndPoint remote      = new IPEndPoint(IPAddress.Any, 0);
+        bool       badReported = false;
 
         while (running)
         {
             try
             {
                 byte[] data = listener.Receive(ref remote);
-                if (data.Length >= 32)
+                var cmd = SimLinkProtocol.TryParseWrenchCmd(data, data.Length, out string reason);
+                if (cmd == null)
                 {
-                    // Write all fields before setting the flag (release ordering via volatile).
-                    pendingFx       = BitConverter.ToSingle(data,  0);
-                    pendingFy       = BitConverter.ToSingle(data,  4);
-                    pendingFz       = BitConverter.ToSingle(data,  8);
-                    pendingTx       = BitConverter.ToSingle(data, 12);
-                    pendingTy       = BitConverter.ToSingle(data, 16);
-                    pendingTz       = BitConverter.ToSingle(data, 20);
-                    pendingDuration = BitConverter.ToSingle(data, 24);
-                    pendingPhase    = BitConverter.ToInt32 (data, 28);
-                    hasPendingCmd   = true;
+                    Interlocked.Increment(ref _rxBad);
+                    if (!badReported)
+                        Debug.LogWarning($"[UdpCommandReceiver] Dropped bad SimLink frame ({reason}). " +
+                                         "Is cFS running the matching SIM_IO build?");
+                    badReported = true;
+                    continue;
+                }
+                badReported = false;
+                Interlocked.Increment(ref _rxGood);
+
+                lock (_lock)
+                {
+                    _latest = cmd;
+                    Monitor.PulseAll(_lock);
                 }
             }
             catch (SocketException)
@@ -123,30 +132,44 @@ public class UdpCommandReceiver : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Lock-step: block until the command answering <paramref name="seq"/> arrives (or the
+    /// timeout expires), then apply it immediately. Returns false on timeout.
+    /// Called from FixedUpdate so the burn starts in this very physics step.
+    /// </summary>
+    public bool WaitForCommand(uint seq, int timeoutMs)
+    {
+        SimLinkProtocol.WrenchCmd cmd;
+        lock (_lock)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (_latest == null || _latest.Value.Seq < seq)
+            {
+                int remaining = (int)(deadline - DateTime.UtcNow).TotalMilliseconds;
+                if (remaining <= 0 || !Monitor.Wait(_lock, remaining))
+                    return false;
+            }
+            if (_latest.Value.Seq != seq)
+                return false; // answer to a newer cycle than ours — shouldn't happen, treat as a miss
+            cmd = _latest.Value;
+        }
+        Apply(cmd);
+        return true;
+    }
+
     void Update()
     {
-        // Process any incoming packet first, then check timeout — ordering matters so a
-        // packet arriving this frame always resets the timer before the check runs.
-        if (hasPendingCmd)
+        // Free-running path only — in lock-step, WaitForCommand owns application.
+        if (!LockStepEngaged)
         {
-            var force      = new Vector3(pendingFx, pendingFy, pendingFz);
-            var torque     = new Vector3(pendingTx, pendingTy, pendingTz);
-            float duration = pendingDuration;
-            GncPhase       = pendingPhase;
-            hasPendingCmd  = false;
-
-            if (rcsModel != null)
-                rcsModel.SetWrenchCommand(force, torque, duration);
-            lastCmdTime = Time.time;
-            cfsActive   = true;
-
-            LastForce    = force;
-            LastTorque   = torque;
-            LastDuration = duration;
-
-            if (debugLog)
-                Debug.Log($"[UdpCommandReceiver] F=({force.x:F1},{force.y:F1},{force.z:F1})N " +
-                          $"T=({torque.x:F1},{torque.y:F1},{torque.z:F1})Nm dur={duration:F3}s");
+            SimLinkProtocol.WrenchCmd? pending = null;
+            lock (_lock)
+            {
+                if (_latest != null && (!_haveApplied || _latest.Value.Seq != _lastAppliedSeq))
+                    pending = _latest;
+            }
+            if (pending != null)
+                Apply(pending.Value);
         }
 
         if (cfsActive && Time.time - lastCmdTime > commandTimeoutSec)
@@ -156,8 +179,28 @@ public class UdpCommandReceiver : MonoBehaviour
                 rcsModel.ClearExternalControl();
             LastForce = LastTorque = Vector3.zero;
             LastDuration = 0f;
-            Debug.Log("[UdpCommandReceiver] cFS command timeout — keyboard control restored.");
+            Debug.Log("[UdpCommandReceiver] cFS command timeout — cFS authority dropped, thrusters cleared.");
         }
+    }
+
+    void Apply(in SimLinkProtocol.WrenchCmd cmd)
+    {
+        _lastAppliedSeq = cmd.Seq;
+        _haveApplied    = true;
+
+        GncPhase = cmd.GncPhase;
+        if (rcsModel != null)
+            rcsModel.SetWrenchCommand(cmd.Force, cmd.Torque, cmd.Duration_s);
+        lastCmdTime = Time.time;
+        cfsActive   = true;
+
+        LastForce    = cmd.Force;
+        LastTorque   = cmd.Torque;
+        LastDuration = cmd.Duration_s;
+
+        if (debugLog)
+            Debug.Log($"[UdpCommandReceiver] Seq {cmd.Seq} F=({cmd.Force.x:F1},{cmd.Force.y:F1},{cmd.Force.z:F1})N " +
+                      $"T=({cmd.Torque.x:F1},{cmd.Torque.y:F1},{cmd.Torque.z:F1})Nm dur={cmd.Duration_s:F3}s");
     }
 
     void OnDestroy()

@@ -6,6 +6,7 @@ using UnityEngine.Events;
 /// when all four conditions are simultaneously within threshold.
 /// Fires onDock once — future cFS telemetry handshake hooks in here.
 /// </summary>
+[DefaultExecutionOrder(-180)] // after RelativeNav, before UdpTelemetrySender
 public class DockingDetector : MonoBehaviour
 {
     public RelativeNav nav;

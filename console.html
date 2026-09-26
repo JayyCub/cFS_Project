@@ -148,6 +148,9 @@
   .phase-badge.APPROACH { color: var(--cyan);    border-color: #0e4a4a; background: #071515; }
   .phase-badge.DOCKED   { color: var(--green);   border-color: #1a4a22; background: #0a1c0f; }
   .phase-badge.HOLD     { color: #c080ff;        border-color: #4a2080; background: #160c28; }
+  .phase-badge.MANUAL   { color: #ff9a40;        border-color: #5a3010; background: #1e1006; }
+  .fdir-row { display:flex; justify-content:space-between; font-size:11px; padding:3px 0; }
+  .fdir-row .lbl { color: var(--textdim); }
 
   .green  { color: var(--green);  }
   .red    { color: var(--red);    }
@@ -342,12 +345,24 @@
 
     <table class="tlm-table">
       <tr>
+        <td class="lbl">Range</td>
+        <td class="val" id="t-range">--- m</td>
+      </tr>
+      <tr>
         <td class="lbl">Closing Speed</td>
         <td class="val" id="t-closing">--- m/s</td>
       </tr>
       <tr>
         <td class="lbl">Lateral Offset</td>
         <td class="val" id="t-lateral">--- m</td>
+      </tr>
+      <tr>
+        <td class="lbl">Att Err P/Y/R</td>
+        <td class="val" id="t-att">--- °</td>
+      </tr>
+      <tr>
+        <td class="lbl">Flags</td>
+        <td class="val gray" id="t-flags" style="font-size:10px;">---</td>
       </tr>
     </table>
 
@@ -377,7 +392,7 @@
 
     <table class="tlm-table">
       <tr>
-        <td class="lbl">Wakeup Count</td>
+        <td class="lbl">Cycle Count</td>
         <td class="val gray" id="t-wakeup">---</td>
       </tr>
       <tr>
@@ -389,7 +404,7 @@
         <td class="val" id="t-cmd-err">---</td>
       </tr>
       <tr>
-        <td class="lbl">UDP Packets Rx</td>
+        <td class="lbl">SIM_STATEs Rx</td>
         <td class="val gray" id="t-udp-pkts">---</td>
       </tr>
       <tr>
@@ -417,7 +432,7 @@
         <div class="stat-val" id="s-cmd-err">0</div>
       </div>
       <div class="stat-box">
-        <div class="stat-lbl">UDP Rx</div>
+        <div class="stat-lbl">SIM_STATE Rx</div>
         <div class="stat-val" id="s-udp">0</div>
       </div>
       <div class="stat-box">
@@ -443,6 +458,15 @@
         Closing limit 0.30 m/s:
         <span id="closing-limit" style="font-weight:700;margin-left:4px;">---</span>
       </div>
+    </div>
+
+    <div class="tlm-sep" style="margin-top:14px;"></div>
+
+    <div style="margin-top:10px;">
+      <div class="panel-title" style="margin-bottom:8px;">FDIR (LC → SC)</div>
+      <div class="fdir-row"><span class="lbl">LC state</span><span id="fdir-lc">---</span></div>
+      <div id="fdir-aps"></div>
+      <div class="fdir-row"><span class="lbl">Axial under-delivery streak</span><span id="fdir-streak">---</span></div>
     </div>
 
     <div class="tlm-sep" style="margin-top:14px;"></div>
@@ -485,6 +509,14 @@
       </button>
     </div>
 
+    <div class="cmd-section">
+      <div class="cmd-section-title">FDIR</div>
+      <button class="cmd-btn" onclick="sendCmd('fdir_rearm')" title="SC RTS 4: set every LC actionpoint ACTIVE again">
+        RE-ARM FDIR (RTS 4)
+        <span class="kbd">F</span>
+      </button>
+    </div>
+
     <div id="cmd-result" class="cmd-result"></div>
 
     <div class="tlm-sep"></div>
@@ -522,9 +554,13 @@ let receivedAny = false;
 
 const evtSource = new EventSource('/events');
 
+// HK (1 Hz), STATE (per cycle) and LC HK each carry part of the picture —
+// merge them so a packet without a field doesn't blank what another set.
+const gncState = {};
+
 evtSource.addEventListener('gnc', e => {
-  const d = JSON.parse(e.data);
-  updateGnc(d);
+  Object.assign(gncState, JSON.parse(e.data));
+  updateGnc(gncState);
   if (!receivedAny) {
     receivedAny = true;
     setConnBadge(true);
@@ -559,6 +595,28 @@ function updateGnc(d) {
 
   const closing = d.closing_ms ?? 0;
   const lateral = d.lateral_m ?? 0;
+  const range   = d.range_m ?? 0;
+  const att     = d.att_err_deg ?? [0, 0, 0];
+
+  set('t-range', range.toFixed(2) + ' m', 'gray');
+  const attMax = Math.max(...att.map(Math.abs));
+  set('t-att', att.map(a => a.toFixed(1)).join(' / ') + ' °',
+      attMax < 2 ? 'green' : attMax < 6 ? 'yellow' : 'red');
+  set('t-flags', (d.flags && d.flags.length) ? d.flags.join(' ') : '---', 'gray');
+
+  // FDIR
+  const lcEl = document.getElementById('fdir-lc');
+  lcEl.textContent = d.lc_state ?? '---';
+  lcEl.className = d.lc_state === 'ACTIVE' ? 'green' : 'yellow';
+  document.getElementById('fdir-aps').innerHTML = (d.fdir ?? []).map(ap => {
+    const cls = ap.state !== 'ACTIVE' ? 'yellow' : ap.result === 'FAIL' ? 'red' : 'green';
+    return `<div class="fdir-row"><span class="lbl">AP${ap.ap} ${esc(ap.label)}</span>` +
+           `<span class="${cls}">${ap.state} / ${ap.result}</span></div>`;
+  }).join('');
+  const streak = d.streak ?? 0;
+  const stEl = document.getElementById('fdir-streak');
+  stEl.textContent = streak;
+  stEl.className = streak >= 3 ? 'red' : streak > 0 ? 'yellow' : 'green';
   const stale   = d.stale_sec ?? 0;
   const cmdErr  = d.cmd_err  ?? 0;
 
@@ -684,6 +742,7 @@ document.addEventListener('keydown', e => {
   else if (k === 'h') sendCmd('gnc_hold');
   else if (k === 'a') sendCmd('gnc_abort');
   else if (k === 't') sendToEnable();
+  else if (k === 'f') sendCmd('fdir_rearm');
 });
 
 // ---------------------------------------------------------------------------
@@ -719,7 +778,7 @@ function setBadge(id, phase) {
 }
 
 function phaseClass(phase) {
-  const map = {IDLE:'gray', CORRECT:'yellow', APPROACH:'cyan', DOCKED:'ok', HOLD:''};
+  const map = {IDLE:'gray', CORRECT:'yellow', APPROACH:'cyan', DOCKED:'ok', HOLD:'', MANUAL:'yellow'};
   return map[phase] || '';
 }
 

@@ -35,7 +35,9 @@ ClohessyWiltshire.cs → orbital drift         rcs_tbl.h    → thruster geometr
 | `cFS/apps/gnc_app/fsw/src/gnc_app.c` | Phase state machine, control law, wakeup handler | Adding phases, changing guidance logic |
 | `cFS/apps/sim_io/` | Device I/O app — owns the Unity sockets, SimLink framing, lock-step `SIM_STATE`/`THRUSTER_CMD` SB messages | Changing packet format or network topology (see `Docs/SIMLINK_ICD.md`) |
 | `cFS/apps/rcs/` | RCS manager — NNLS thruster allocation + PWM (min impulse bit, per-cycle max, saturation scaling) from `rcs_thr_tbl.c` | Changing thruster geometry, thrust, pulse limits, or the allocation algorithm |
-| `cFS/apps/gnc_app/fsw/src/gnc_app.h` | All enums, structs, constants, function prototypes | Adding new state, message IDs, or event IDs |
+| `cFS/apps/gnc_app/fsw/src/gnc_app.h` | Internal enums, structs, constants, event IDs, prototypes | Adding new state or event IDs |
+| `cFS/apps/gnc_app/fsw/inc/gnc_app_msg.h` | Public interface: command codes, HK and per-cycle STATE packets (size-asserted) | Adding a telemetry field or command (then update LC tables / ground tools that read it) |
+| `cFS/sample_defs/cpu1/tables/` | Mission FDIR + recorder tables: LC watchpoints/actionpoints, SC RTS 1–4, DS recorder, HS app monitor | Changing a fault threshold, response, or what gets recorded |
 | `cFS/apps/gnc_app/fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` — 24 tunable gain/physical-constant fields | Adding new gains you want in the table |
 | `cFS/apps/gnc_app/fsw/tables/gnc_param_tbl.c` | Default values for the gain table | Changing defaults at compile time |
 
@@ -213,7 +215,9 @@ The byte-level layouts, framing, CRC and lock-step protocol are defined in **[SI
 | `HoldPoint1_m` / `HoldPoint2_m` | 20 / 3 | m | Autonomous hold points (0 = off) |
 | `AxialBrakeAccel_mss` | 0.189 | m/s² | Planning estimate for the hold-point braking lookahead only |
 | `ManualAccel_mss` / `ManualRate_rads` / `ManualRateDeadband_rads` | 0.02 / 0.0175 / 0.0008 | m/s², rad/s | Crew hand-controller authority |
-| `TlmLossTimeoutSec` | 2.0 | s | Sim-link loss → auto-abort |
+| `EntrySettleCycles` | 15 | cycles | CORRECT → APPROACH settle gate (integer since phase 3) |
+
+Fault thresholds (sim link loss after 2 s, 3-cycle axial under-delivery) are not GNC parameters. They are LC watchpoints; see [Fault Protection](#fault-protection-fdir-lc--sc).
 
 **RCS** lives in `RCS_ThrTbl_t` (`rcs_tbl.h`, defaults in `rcs_thr_tbl.c` → `/cf/rcs_thr_tbl.tbl`, managed on the 1 Hz HK tick). It holds `Thrust_N` (400), `MinOnTime_s` (0.020), `MaxOnTime_s` (0.190), and per-thruster `Pos_m`/`Dir`/`Enabled` (T00–T03 disabled).
 
@@ -259,6 +263,36 @@ The Unity scene is the real hardware and cFS tables are flight software's model 
 
 ---
 
+## Fault Protection (FDIR: LC → SC)
+
+GNC measures, LC decides, SC responds. GNC publishes what it observes (`TlmStaleSec` in HK, `UnderDeliveryStreak` in the per-cycle STATE packet) and takes no fault action itself. LC watchpoints turn those fields into conditions, LC actionpoints combine them into flight rules, and a rule that fails starts an SC stored command sequence (RTS). The ABORT and HOLD they send are the same GNC commands the ground uses. Every threshold and response lives in a table under `cFS/sample_defs/cpu1/tables/`, so the flight rules can change without touching GNC code.
+
+| AP | Fails when (RPN over watchpoints) | Sampled by | Response |
+|----|-----------------------------------|------------|----------|
+| 0 | GNC HK `TlmStaleSec ≥ 2` AND NOT `Phase == DOCKED` AND NOT `Flags & ABORT_LATCH` | SCH_LAB, 1 Hz wall clock (must run while the sim is silent) | RTS 2: GNC ABORT |
+| 1 | GNC STATE `UnderDeliveryStreak ≥ 3` AND `Phase == APPROACH` | gnc_app, end of every lock-step cycle (persistence counts sim cycles) | RTS 3: GNC HOLD |
+
+| RTS | When | Does |
+|-----|------|------|
+| 1 | Automatically at power-on | LC → ACTIVE (it boots DISABLED); enable RTS 2–4 (SC loads every RTS disabled) |
+| 2 | LC AP 0 | GNC ABORT |
+| 3 | LC AP 1 | GNC HOLD (stop closing, keep station-keeping; the ground decides GO or ABORT) |
+| 4 | Ground (`gnc_cmd.py rearm`, console **RE-ARM FDIR**) | LC SET_AP_STATE(all, ACTIVE) |
+
+- **Re-arm after every response.** A fired actionpoint goes PASSIVE so a persisting fault can't restart its RTS every sample. That also means a second fault goes unanswered until you run RTS 4.
+- **Link-loss latency is about 4 s**, not 2 s. The watchpoint trips at 2 s of silence, and the 1 Hz LC sample and the SC wakeup each add up to about 1 s. In lock-step this doesn't matter physically: a silent Unity is either paused (physics stopped) or free-running with the valves closed. The abort only keeps guidance from resuming on its own.
+- **Files:** `lc_def_wdt.c` (watchpoints: packet, offset via `offsetof`, comparison), `lc_def_adt.c` (actionpoints: RPN, persistence, event text, RTS), `sc_rts001-004.c` (sequences; command checksums are computed at compile time because SC validates them). All of them are cpu1-only overrides: cpu2 shares the build but has no GNC.
+- **HS** (`hs_amt.c`) watches the execution counters of GNC_APP, RCS, SIM_IO, LC, SC and DS, and sends an event if one stops for 10 s. That catches a hung app, not a paused sim, because every app still wakes on its 1 Hz HK.
+
+### Add a new fault response
+
+1. Publish the measurement from the owning app (HK if it must be evaluated while the sim is silent, STATE if it is per-cycle).
+2. Add watchpoint(s) to `lc_def_wdt.c`, using `offsetof()` on the packet struct from the app's public `*_msg.h`.
+3. Add an actionpoint to `lc_def_adt.c`, and put it in a sampled range: the SCH_LAB entry covers AP 0, and `GNC_APP_LC_CYCLE_AP_FIRST/LAST` covers the per-cycle group.
+4. Add or reuse an RTS. There are 4 by default (`SC_NUMBER_OF_RTS`), and RTS 1 must enable any new one.
+
+---
+
 ## Common Tasks
 
 ### Change the axial closure rate
@@ -275,7 +309,7 @@ Edit `AxialKp`, `MaxCloseSpeed` (outer cap), and/or `MaxCloseSpeed_Inner` (inner
 
 ### Add a new ground command
 
-1. Add a `_CC` constant in `gnc_app.h`
+1. Add a `_CC` constant in `gnc_app_msg.h`
 2. Add a case in `GNC_APP_ProcessCmd()` in `gnc_app.c`
 3. Add a new EVS event ID and string
 4. Add the command to `gnc_cmd.py` (Python CCSDS sender)
@@ -303,7 +337,7 @@ With cFS stopped, press **F8** in Unity to run `ThrusterDiagnostic.cs`. It fires
 
 ## Scenario Reset (Unity)
 
-Press **Backspace** to reset the scenario. `ScenarioReset.cs` returns the chaser to its initial position/rotation and zeroes all velocities. The cFS GNC phase is not reset — send `python3 gnc_cmd.py abort` then `go` if you want to restart from IDLE (this also re-arms both autonomous hold points).
+Press **Backspace** to reset the scenario. `ScenarioReset.cs` returns the chaser to its initial position/rotation and zeroes all velocities. The cFS GNC phase is not reset — send `python3 gnc_cmd.py abort` then `go` if you want to restart from IDLE (this also re-arms both autonomous hold points). If an FDIR response fired during the run, also send `python3 gnc_cmd.py rearm`.
 
 ---
 
@@ -316,6 +350,9 @@ python3 gnc_cmd.py go      # resume from HOLD
 python3 gnc_cmd.py abort   # coast immediately; inhibit guidance
 python3 gnc_cmd.py noop    # heartbeat (verifies command link)
 python3 gnc_cmd.py reset   # zero HK counters
+python3 gnc_cmd.py rearm   # SC RTS 4: re-arm the LC fault responses after one fired
+python3 gnc_cmd.py trace-on   # per-cycle "GNC #" line in the cFS console (EVS DEBUG)
+python3 gnc_cmd.py trace-off
 ```
 
 Sent to CI_LAB on port 1234. Every command is acknowledged by an EVS event in the cFS console.
@@ -327,9 +364,7 @@ Sent to CI_LAB on port 1234. Every command is acknowledged by an EVS event in th
 | EID | Name | Meaning |
 |-----|------|---------|
 | 1 | INIT_INF | App initialized successfully |
-| 2 | WAKEUP_INF | 1 Hz wakeup log (phase, range, speed, lateral, attitude errors, F/T, duration) |
-| 5 | UDP_INIT_INF | Telemetry recv socket bound on port 5005 |
-| 9 | CMD_INIT_INF | Command send socket ready; shows resolved Docker IP |
+| 2 | WAKEUP_INF | Per-cycle `GNC #` line (DEBUG — off unless `gnc_cmd.py trace-on`; the STATE packet is the data channel) |
 | 11 | PHASE_INF | Phase transition (old→new) |
 | 12 | NOOP_INF | NOOP command received |
 | 13 | RST_INF | RESET_COUNTERS command received |
@@ -342,6 +377,12 @@ Sent to CI_LAB on port 1234. Every command is acknowledged by an EVS event in th
 | 20 | TBL_ERR | Parameter table load/access error |
 | 21 | HOLDPT1_INF | Autonomous hold point 1 triggered |
 | 22 | HOLDPT2_INF | Autonomous hold point 2 triggered |
+| 23 | TBL_VAL_ERR | Parameter table image rejected by the validator |
+| 24 | BAD_CTRL | Non-finite control output, coasting |
+| 25, 26 | — | Retired in phase 3: link-loss abort and actuator anomaly are now LC events 1000 / 1001 |
+| 27 | BAD_DT | SIM_STATE cycle length out of range |
+| 28 | LINK_INF | Sim link restored after ≥ 2 s of silence (informational) |
+| 29 | MANUAL_INF | Crew hand-controller takeover |
 
 ---
 

@@ -3,6 +3,7 @@
 Ground Console — cFS / GNC Docking Mission Controller
 """
 
+import csv
 import json
 import queue
 import socket
@@ -33,28 +34,66 @@ GNC_HOLD_CC = 0x02
 GNC_GO_CC = 0x03
 GNC_ABORT_CC = 0x04
 
+SC_CMD_MID = 0x18A9
+SC_START_RTS_CC = 4
+RTS_FDIR_REARM = 4          # sample_defs/cpu1/tables/sc_rts004.c
+
 GNC_HK_MID = 0x0893
+GNC_STATE_MID = 0x0895
+LC_HK_MID = 0x08A7
 EVS_LONG_MID = 0x0808
 
 # ---------------------------------------------------------------------------
-# GNC HK layout assumptions
+# Packet layouts (little-endian payloads after the 16-byte CCSDS tlm header)
+# Mirror cFS/apps/gnc_app/fsw/inc/gnc_app_msg.h — its _Static_asserts pin the
+# sizes these formats assume.
 # ---------------------------------------------------------------------------
 
-GNC_OFF_WAKEUP = 16
-GNC_OFF_CMDCNT = 20
-GNC_OFF_CMDERR = 24
-GNC_OFF_UDPPKTS = 28
-GNC_OFF_PHASE = 32
-GNC_OFF_CLOSING = 36
-GNC_OFF_LATERAL = 40
-GNC_OFF_STALE = 44
-GNC_HK_MIN_LEN = 48
+TLM_HDR_LEN = 16
 
-EVS_OFF_APPNAME = 12
-EVS_OFF_EVENTID = 32
-EVS_OFF_EVTTYPE = 34
-EVS_OFF_MESSAGE = 44
-EVS_LONG_MIN_LEN = 166
+# GNC_APP_HkTlm_t: CmdCount CmdErrCount CycleCount SimStateCount Phase Flags Spare TlmStaleSec
+GNC_HK = struct.Struct("<IIIIBBHI")
+# GNC_APP_StateTlm_t: SimTime Seq Phase Flags UnderDeliveryStreak SettleCounter Spare + 23 floats
+GNC_STATE = struct.Struct("<dIBBHHH23f")
+assert TLM_HDR_LEN + GNC_HK.size == 40 and TLM_HDR_LEN + GNC_STATE.size == 128
+
+GNC_STATE_FIELDS = (
+    ["sim_time", "seq", "phase", "flags", "under_delivery_streak", "settle_counter", "spare",
+     "range_m", "closing_ms", "lateral_m", "lat_x_m", "lat_y_m",
+     "pitch_err_deg", "yaw_err_deg", "roll_err_deg",
+     "angvel_x", "angvel_y", "angvel_z",
+     "relpos_x", "relpos_y", "relpos_z",
+     "relvel_x", "relvel_y", "relvel_z",
+     "px_ns", "py_ns", "pz_ns", "lx_nms", "ly_nms", "lz_nms"]
+)
+
+GNC_FLAGS = {
+    0x01: "ABORT_LATCH",
+    0x02: "HOLDPT1_ARMED",
+    0x04: "HOLDPT2_ARMED",
+    0x08: "IN_CORRIDOR",
+    0x10: "CONTACT",
+    0x20: "BAD_CTRL",
+    0x40: "LINK_UP",
+}
+
+# LC_HkTlm_t: CmdCount CmdErrCount CurrentLCState Pad8, WPResults[44], APResults[88]
+LC_OFF_STATE = TLM_HDR_LEN + 2
+LC_OFF_APRESULTS = TLM_HDR_LEN + 4 + 44
+LC_STATES = {1: "ACTIVE", 2: "PASSIVE", 3: "DISABLED"}
+LC_AP_STATES = {0: "UNUSED", 1: "ACTIVE", 2: "PASSIVE", 3: "DISABLED"}
+LC_AP_RESULTS = {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "STALE"}
+FDIR_APS = {0: "Link loss -> ABORT", 1: "Axial anomaly -> HOLD"}  # lc_def_adt.c
+
+RUN_LOG_DIR = Path(__file__).parent / "run_logs"
+
+# CFE_EVS_LongEventTlm_t after the 16-byte tlm header: AppName[20], EventID,
+# EventType (native little-endian uint16s), SpacecraftID, ProcessorID, Message[122]
+EVS_OFF_APPNAME = TLM_HDR_LEN
+EVS_OFF_EVENTID = TLM_HDR_LEN + 20
+EVS_OFF_EVTTYPE = TLM_HDR_LEN + 22
+EVS_OFF_MESSAGE = TLM_HDR_LEN + 32
+EVS_LONG_MIN_LEN = EVS_OFF_MESSAGE + 122
 
 PHASE_NAMES = {
     0: "IDLE",
@@ -62,6 +101,7 @@ PHASE_NAMES = {
     2: "APPROACH",
     3: "DOCKED",
     4: "HOLD",
+    5: "MANUAL",
 }
 
 # ---------------------------------------------------------------------------
@@ -77,9 +117,15 @@ _gnc_state = {
     "cmd_cnt": 0,
     "cmd_err": 0,
     "udp_pkts": 0,
+    "flags": [],
     "closing_ms": 0.0,
     "lateral_m": 0.0,
+    "range_m": 0.0,
+    "att_err_deg": [0.0, 0.0, 0.0],
     "stale_sec": 0,
+    "streak": 0,
+    "lc_state": "---",
+    "fdir": [],
     "last_rx": None,
 }
 
@@ -126,6 +172,15 @@ def _build_no_payload_cmd(mid: int, cc: int) -> bytes:
     return _build_cmd_header(mid, cc, 8)
 
 
+def _payload_checksum(pkt: bytes) -> int:
+    """Checksum over the whole packet (header + payload), checksum byte taken as 0."""
+    x = 0xFF
+    for i, b in enumerate(pkt):
+        if i != 7:
+            x ^= b
+    return x
+
+
 def _build_to_enable_cmd(dest_ip: str) -> bytes:
     total_len = 24
 
@@ -144,32 +199,70 @@ def _build_to_enable_cmd(dest_ip: str) -> bytes:
 # Telemetry decoding
 # ---------------------------------------------------------------------------
 
+def _flag_names(flags: int):
+    return [name for bit, name in GNC_FLAGS.items() if flags & bit]
+
+
 def _decode_gnc_hk(data: bytes):
-    if len(data) < GNC_HK_MIN_LEN:
+    if len(data) < TLM_HDR_LEN + GNC_HK.size:
         return None
 
-    phase_byte = data[GNC_OFF_PHASE]
-
-    wakeup, = struct.unpack_from("<I", data, GNC_OFF_WAKEUP)
-    cmd_cnt, = struct.unpack_from("<I", data, GNC_OFF_CMDCNT)
-    cmd_err, = struct.unpack_from("<I", data, GNC_OFF_CMDERR)
-    udp_pkts, = struct.unpack_from("<I", data, GNC_OFF_UDPPKTS)
-
-    closing, = struct.unpack_from("<f", data, GNC_OFF_CLOSING)
-    lateral, = struct.unpack_from("<f", data, GNC_OFF_LATERAL)
-
-    stale, = struct.unpack_from("<I", data, GNC_OFF_STALE)
+    cmd_cnt, cmd_err, cycles, sim_states, phase, flags, _, stale = GNC_HK.unpack_from(data, TLM_HDR_LEN)
 
     return {
-        "phase": PHASE_NAMES.get(phase_byte, f"UNK({phase_byte})"),
-        "wakeup": wakeup,
+        "phase": PHASE_NAMES.get(phase, f"UNK({phase})"),
+        "wakeup": cycles,
         "cmd_cnt": cmd_cnt,
         "cmd_err": cmd_err,
-        "udp_pkts": udp_pkts,
-        "closing_ms": closing,
-        "lateral_m": lateral,
+        "udp_pkts": sim_states,
+        "flags": _flag_names(flags),
         "stale_sec": stale,
     }
+
+
+def _decode_gnc_state(data: bytes):
+    if len(data) < TLM_HDR_LEN + GNC_STATE.size:
+        return None
+    return dict(zip(GNC_STATE_FIELDS, GNC_STATE.unpack_from(data, TLM_HDR_LEN)))
+
+
+def _decode_lc_hk(data: bytes):
+    if len(data) < LC_OFF_APRESULTS + 1:
+        return None
+    fdir = []
+    for ap, label in FDIR_APS.items():
+        byte = data[LC_OFF_APRESULTS + ap // 2]
+        shift = 0 if ap % 2 == 0 else 4           # even AP in the low nibble
+        fdir.append({
+            "ap": ap,
+            "label": label,
+            "state": LC_AP_STATES[(byte >> (shift + 2)) & 0x3],
+            "result": LC_AP_RESULTS[(byte >> shift) & 0x3],
+        })
+    return {"lc_state": LC_STATES.get(data[LC_OFF_STATE], "?"), "fdir": fdir}
+
+
+class StateRecorder:
+    """Writes every GNC STATE packet to run_logs/gnc_state_<time>.csv — the
+    ground-side copy of what DS records onboard (tools/fdr_decode.py reads that)."""
+
+    def __init__(self):
+        self._writer = None
+        self._file = None
+
+    def write(self, row: dict):
+        if self._writer is None:
+            RUN_LOG_DIR.mkdir(exist_ok=True)
+            path = RUN_LOG_DIR / f"gnc_state_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+            self._file = open(path, "w", newline="")
+            self._writer = csv.DictWriter(self._file, fieldnames=["rx_time"] + GNC_STATE_FIELDS)
+            self._writer.writeheader()
+            print(f"[LOG] GNC STATE -> {path}")
+        self._writer.writerow({"rx_time": f"{time.time():.3f}", **row})
+        self._file.flush()
+
+
+_recorder = StateRecorder()
 
 
 def _decode_evs_long(data: bytes):
@@ -179,8 +272,8 @@ def _decode_evs_long(data: bytes):
     app_raw = data[EVS_OFF_APPNAME : EVS_OFF_APPNAME + 20]
     app_name = app_raw.rstrip(b"\x00").decode("ascii", errors="replace")
 
-    evt_id, = struct.unpack_from(">H", data, EVS_OFF_EVENTID)
-    evt_type, = struct.unpack_from(">H", data, EVS_OFF_EVTTYPE)
+    evt_id, = struct.unpack_from("<H", data, EVS_OFF_EVENTID)
+    evt_type, = struct.unpack_from("<H", data, EVS_OFF_EVTTYPE)
 
     msg_raw = data[EVS_OFF_MESSAGE : EVS_OFF_MESSAGE + 122]
     message = msg_raw.rstrip(b"\x00").decode("ascii", errors="replace")
@@ -245,12 +338,6 @@ def udp_recv_thread():
             print(f"[UDP] recv error: {e}")
             continue
 
-        print(
-            f"[UDP] RX from {addr[0]}:{addr[1]} "
-            f"len={len(data)} "
-            f"raw={data[:32].hex()}"
-        )
-
         if len(data) < 6:
             continue
 
@@ -275,6 +362,37 @@ def udp_recv_thread():
 
                 _broadcast("gnc", decoded)
 
+        elif mid == GNC_STATE_MID:
+            st = _decode_gnc_state(data)
+
+            if st:
+                _recorder.write(st)
+                decoded = {
+                    "phase": PHASE_NAMES.get(st["phase"], f"UNK({st['phase']})"),
+                    "flags": _flag_names(st["flags"]),
+                    "range_m": st["range_m"],
+                    "closing_ms": st["closing_ms"],
+                    "lateral_m": st["lateral_m"],
+                    "att_err_deg": [st["pitch_err_deg"], st["yaw_err_deg"], st["roll_err_deg"]],
+                    "streak": st["under_delivery_streak"],
+                    "sim_time": st["sim_time"],
+                    "last_rx": time.strftime("%H:%M:%S"),
+                }
+
+                with _gnc_lock:
+                    _gnc_state.update(decoded)
+
+                _broadcast("gnc", decoded)
+
+        elif mid == LC_HK_MID:
+            decoded = _decode_lc_hk(data)
+
+            if decoded:
+                with _gnc_lock:
+                    _gnc_state.update(decoded)
+
+                _broadcast("gnc", decoded)
+
         elif mid == EVS_LONG_MID:
             decoded = _decode_evs_long(data)
 
@@ -288,8 +406,9 @@ def udp_recv_thread():
 
 _cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-def send_cmd(mid: int, cc: int):
-    pkt = _build_no_payload_cmd(mid, cc)
+def send_cmd(mid: int, cc: int, payload: bytes = b""):
+    pkt = _build_cmd_header(mid, cc, 8 + len(payload)) + payload
+    pkt = pkt[:7] + bytes([_payload_checksum(pkt)]) + pkt[8:]
 
     try:
         _cmd_sock.sendto(pkt, (CI_HOST, CI_PORT))
@@ -343,6 +462,8 @@ _CMD_MAP = {
     "gnc_hold": (GNC_CMD_MID, GNC_HOLD_CC),
     "gnc_go": (GNC_CMD_MID, GNC_GO_CC),
     "gnc_abort": (GNC_CMD_MID, GNC_ABORT_CC),
+    # SC START_RTS 4: set every LC actionpoint ACTIVE again after an FDIR response
+    "fdir_rearm": (SC_CMD_MID, SC_START_RTS_CC, struct.pack("<HH", RTS_FDIR_REARM, 0)),
 }
 
 class ConsoleHandler(BaseHTTPRequestHandler):
@@ -382,8 +503,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 self._json({"status": "OK"})
 
             elif cmd in _CMD_MAP:
-                mid, cc = _CMD_MAP[cmd]
-                result = send_cmd(mid, cc)
+                result = send_cmd(*_CMD_MAP[cmd])
                 self._json({"status": result})
 
             else:

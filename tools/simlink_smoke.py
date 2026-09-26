@@ -13,6 +13,12 @@ each is answered by a CRC-valid THRUSTER_CMD echoing the same Seq. Scenario:
   5. ground ABORT                            -> IDLE, all valves closed
   6. corrupt frame                           -> dropped, not answered
 
+FDIR (realism phase 3 — LC watchpoints/actionpoints -> SC RTSs, wall-clock paced):
+  7. GO, then sim silent 5 s                 -> LC AP 0 -> SC RTS 2 -> GNC ABORT (IDLE)
+  8. re-arm (SC RTS 4), GO, silent again     -> aborts again (AP 0 was re-armed)
+  9. re-arm, GO, reach APPROACH, then burns
+     that change nothing (frozen closing)    -> LC AP 1 -> SC RTS 3 -> GNC HOLD
+
 Usage (cFS running, SIM_IO DestHost resolving to this machine, CI_LAB on --ci-port):
     python3 tools/simlink_smoke.py [--host 127.0.0.1]
 
@@ -40,6 +46,10 @@ PHASES = {0: "IDLE", 1: "CORRECT", 2: "APPROACH", 3: "DOCKED", 4: "HOLD", 5: "MA
 
 GNC_CMD_MID = 0x1893
 GNC_GO, GNC_ABORT = 3, 4
+
+SC_CMD_MID = 0x18A9
+SC_START_RTS = 4
+RTS_FDIR_REARM = 4
 
 
 def crc16(data: bytes) -> int:
@@ -80,8 +90,12 @@ def parse_thruster_cmd(data):
     return {"seq": seq, "sim_time": sim_time, "phase": phase, "on": on, "n": n}, None
 
 
-def ccsds_cmd(mid, fc):
-    return struct.pack(">HHHBB", mid, 0xC000, 0x0001, fc & 0x7F, 0)
+def ccsds_cmd(mid, fc, payload=b""):
+    body = struct.pack(">HHHBB", mid, 0xC000, 1 + len(payload), fc & 0x7F, 0) + payload
+    cksum = 0xFF
+    for b in body:
+        cksum ^= b
+    return body[:7] + bytes([cksum]) + body[8:]
 
 
 class Link:
@@ -122,9 +136,27 @@ class Link:
             self.fail(f"Seq {self.seq}: answered Seq {cmd['seq']} simTime {cmd['sim_time']} n {cmd['n']}")
         return cmd
 
-    def ground(self, fc):
-        self.tx.sendto(ccsds_cmd(GNC_CMD_MID, fc), (self.a.host, self.a.ci_port))
-        time.sleep(1.2)  # CI_LAB polls its uplink socket; let GNC see the command first
+    def ground(self, fc, mid=GNC_CMD_MID, payload=b"", **state):
+        """Uplink a command, then keep the lock-step cycling for 1.2 s while CI_LAB
+        (which polls its socket) delivers it — a silent gap that long would itself
+        count toward the LC link-loss watchpoint."""
+        self.tx.sendto(ccsds_cmd(mid, fc, payload), (self.a.host, self.a.ci_port))
+        return self.paced(6, **state)
+
+    def paced(self, n, **state):
+        """n cycles at the real-time 5 Hz cadence (LC/SC run on wall-clock rate groups)."""
+        c = None
+        for _ in range(n):
+            c = self.cycle(**state) or c
+            time.sleep(0.2)
+        return c
+
+    def rearm_fdir(self, **state):
+        return self.ground(SC_START_RTS, mid=SC_CMD_MID, payload=struct.pack("<HH", RTS_FDIR_REARM, 0), **state)
+
+    def silent(self, sec):
+        """Stop the sim (as a paused/crashed Unity would) and wait."""
+        time.sleep(sec)
 
 
 def fired(cmd):
@@ -205,6 +237,52 @@ def main():
         L.fail(f"corrupt frame was answered ({len(data)} bytes)")
     except socket.timeout:
         print("  6 corrupt frame                     dropped (OK)")
+
+    # 7. Link loss while guidance is active -> LC/SC abort
+    L.ground(GNC_GO, rng=40.0)
+    c = L.paced(3, rng=40.0)
+    if c and c["phase"] not in (1, 2):
+        L.fail("expected guidance active after GO")
+    L.silent(5.0)
+    c = L.cycle(rng=40.0)
+    if c:
+        show("7 link loss 5 s (LC AP0 -> RTS 2)", c)
+        if c["phase"] != 0 or fired(c):
+            L.fail("expected IDLE (FDIR ABORT) with valves closed after link loss")
+
+    # 8. Re-arm, fly, lose the link again -> aborts again only if AP 0 was re-armed
+    L.rearm_fdir(rng=40.0)
+    L.ground(GNC_GO, rng=40.0)
+    L.paced(3, rng=40.0)
+    L.silent(5.0)
+    c = L.cycle(rng=40.0)
+    if c:
+        show("8 re-armed, link loss again", c)
+        if c["phase"] != 0:
+            L.fail("expected a second FDIR ABORT — RTS 4 did not re-arm AP 0")
+
+    # 9. Actuator anomaly on approach -> LC AP1 -> RTS 3 HOLD
+    L.rearm_fdir(rng=40.0)
+    L.ground(GNC_GO, rng=40.0)
+    for _ in range(40):                         # settle gate: 15 steady cycles
+        c = L.cycle(rng=40.0)
+        if c and c["phase"] == 2:
+            break
+    if not c or c["phase"] != 2:
+        L.fail("never reached APPROACH (settle gate)")
+    else:
+        show("9a APPROACH (burning to close)", c)
+        held = False
+        for _ in range(20):                      # burns commanded, closing speed stays 0
+            c = L.cycle(rng=40.0)
+            time.sleep(0.2)
+            if c and c["phase"] == 4:
+                held = True
+                break
+        if c:
+            show("9b frozen closing (LC AP1 -> RTS 3)", c)
+        if not held:
+            L.fail("expected FDIR HOLD after axial burns stopped delivering")
 
     if L.rtts:
         r = sorted(L.rtts)

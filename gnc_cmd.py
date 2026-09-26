@@ -9,57 +9,82 @@ Usage:
     python3 gnc_cmd.py hold
     python3 gnc_cmd.py go
     python3 gnc_cmd.py abort
+    python3 gnc_cmd.py rearm       # SC RTS 4: re-arm the LC FDIR actionpoints
+    python3 gnc_cmd.py trace-on    # show the per-cycle "GNC #" line in the cFS console
+    python3 gnc_cmd.py trace-off
 
 CI_LAB listens on 127.0.0.1:1234 by default (cpu1, no port offset).
-cFS does not enforce CCSDS checksum in lab builds so the checksum byte is 0x00.
 
-CCSDS packet layout (8 bytes total, big-endian primary header):
-  [0-1]  StreamId  = 0x1893  (GNC_APP_CMD_MID — type=cmd, secondary-hdr=present)
+CCSDS packet layout (big-endian primary header):
+  [0-1]  StreamId  = command MID (type=cmd, secondary-hdr=present)
   [2-3]  Sequence  = 0xC000  (standalone packet, count=0)
-  [4-5]  PDLength  = 0x0001  (data field is 2 bytes: FC + checksum; PDLen = 2-1)
+  [4-5]  PDLength  = total length - 7
   [6]    FcnCode   = command function code (bits 6-0)
-  [7]    Checksum  = 0x00
+  [7]    Checksum  = XOR checksum (all bytes XOR to 0xFF); CI_LAB doesn't check
+                     it, but commands relayed by SC (RTSs) must carry a valid one
+  [8-]   payload (little-endian, as the flight software reads it)
 """
 
 import socket
 import struct
 import sys
 
-# GNC_APP_CMD_MID and function codes — must match gnc_app.h exactly
-GNC_APP_CMD_MID = 0x1893
+GNC_APP_CMD_MID = 0x1893   # gnc_app_msgids.h
+SC_CMD_MID = 0x18A9        # SC command MID (topic 0xA9)
+CFE_EVS_CMD_MID = 0x1801   # cFE EVS command MID (topic 0x01)
 
+SC_START_RTS_CC = 4
+RTS_FDIR_REARM = 4         # cFS/sample_defs/cpu1/tables/sc_rts004.c
+
+EVS_ENABLE_APP_EVENT_TYPE_CC = 5
+EVS_DISABLE_APP_EVENT_TYPE_CC = 6
+EVS_DEBUG_BIT = 0x01
+
+def _evs_app_type(app: str, bitmask: int) -> bytes:
+    # CFE_EVS_AppNameBitMaskCmd_Payload_t: AppName[20], BitMask, Spare
+    return struct.pack("<20sBB", app.encode("ascii"), bitmask, 0)
+
+
+# name: (MID, function code, payload, what it does) — GNC codes match gnc_app_msg.h
 COMMANDS = {
-    "noop":  0,   # GNC_APP_NOOP_CC
-    "reset": 1,   # GNC_APP_RESET_COUNTERS_CC
-    "hold":  2,   # GNC_APP_HOLD_CC
-    "go":    3,   # GNC_APP_GO_CC
-    "abort": 4,   # GNC_APP_ABORT_CC
+    "noop":      (GNC_APP_CMD_MID, 0, b"", "GNC NOOP"),
+    "reset":     (GNC_APP_CMD_MID, 1, b"", "GNC RESET_COUNTERS"),
+    "hold":      (GNC_APP_CMD_MID, 2, b"", "GNC HOLD"),
+    "go":        (GNC_APP_CMD_MID, 3, b"", "GNC GO"),
+    "abort":     (GNC_APP_CMD_MID, 4, b"", "GNC ABORT"),
+    "rearm":     (SC_CMD_MID, SC_START_RTS_CC, struct.pack("<HH", RTS_FDIR_REARM, 0),
+                  "SC START_RTS 4 (re-arm LC FDIR actionpoints)"),
+    "trace-on":  (CFE_EVS_CMD_MID, EVS_ENABLE_APP_EVENT_TYPE_CC, _evs_app_type("GNC_APP", EVS_DEBUG_BIT),
+                  "EVS enable GNC_APP DEBUG events (per-cycle GNC # line)"),
+    "trace-off": (CFE_EVS_CMD_MID, EVS_DISABLE_APP_EVENT_TYPE_CC, _evs_app_type("GNC_APP", EVS_DEBUG_BIT),
+                  "EVS disable GNC_APP DEBUG events"),
 }
 
 CI_LAB_HOST = "127.0.0.1"
 CI_LAB_PORT = 1234
 
 
-def build_ccsds_cmd(apid: int, fc: int) -> bytes:
-    stream_id = apid          # CCSDS type=1 (cmd), sec-hdr=1 already encoded in MID
-    sequence  = 0xC000        # standalone packet, count 0
-    pdlength  = 0x0001        # secondary header is 2 bytes; PDLen = 2 - 1
-    fc_byte   = fc & 0x7F     # function code occupies bits 6-0
-    checksum  = 0x00
-    return struct.pack(">HHHBB", stream_id, sequence, pdlength, fc_byte, checksum)
+def build_ccsds_cmd(mid: int, fc: int, payload: bytes = b"") -> bytes:
+    pkt = bytearray(struct.pack(">HHHBB", mid, 0xC000, 1 + len(payload), fc & 0x7F, 0) + payload)
+    cksum = 0xFF
+    for b in pkt:
+        cksum ^= b
+    pkt[7] = cksum
+    return bytes(pkt)
 
 
 def send_cmd(name: str) -> None:
-    fc = COMMANDS.get(name.lower())
-    if fc is None:
+    entry = COMMANDS.get(name.lower())
+    if entry is None:
         print(f"Unknown command '{name}'. Valid: {', '.join(COMMANDS)}")
         sys.exit(1)
 
-    pkt = build_ccsds_cmd(GNC_APP_CMD_MID, fc)
+    mid, fc, payload, what = entry
+    pkt = build_ccsds_cmd(mid, fc, payload)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.sendto(pkt, (CI_LAB_HOST, CI_LAB_PORT))
 
-    print(f"Sent GNC {name.upper()} (FC={fc}) -> {CI_LAB_HOST}:{CI_LAB_PORT} ({len(pkt)} bytes)")
+    print(f"Sent {what} (MID=0x{mid:04X} FC={fc}) -> {CI_LAB_HOST}:{CI_LAB_PORT} ({len(pkt)} bytes)")
 
 
 if __name__ == "__main__":

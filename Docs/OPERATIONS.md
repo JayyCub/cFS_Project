@@ -95,7 +95,7 @@ Nothing else happens until Unity is playing. GNC is lock-stepped to the simulati
 
 Open `cFS_DockingSim/` in the Unity Editor and press **Play** on **Scene2**.
 
-Within a cycle or two the Unity console shows `[UdpTelemetrySender] cFS answering — lock-step ENGAGED`, and cFS logs one line per GNC cycle (0.2 s of sim time):
+Within a cycle or two the Unity console shows `[UdpTelemetrySender] cFS answering — lock-step ENGAGED`. The cFS console stays quiet: per-cycle GNC state goes out as the STATE telemetry packet (ground console, flight data recorder), not as an event line. To see the old one-line-per-cycle trace, send `python3 gnc_cmd.py trace-on`:
 
 ```
 GNC #3 [IDLE] Rng=15.23 Spd=0.000 Lat=2.410 PYR=0.0/0.0/0.0 W=0.000/0.000/0.000 C0D0 P=0/0/0 L=0/0/0
@@ -140,10 +140,12 @@ python3 gnc_cmd.py <command>
 | Command | Effect |
 |---------|--------|
 | `noop` | Heartbeat. Verifies the command link is alive. Increments CmdCount in HK. |
-| `reset` | Zeros HK counters (CmdCount, CmdErrCount, UdpPacketsReceived). |
+| `reset` | Zeros HK counters (CmdCount, CmdErrCount, SimStateCount). |
 | `hold` | Immediately freeze at current range. GNC station-keeps — no axial closure. |
 | `go` | Release a `hold` or the startup pre-latch. Resumes guidance. |
 | `abort` | **Emergency stop.** Sends immediate coast to Unity. All thrust inhibited until you send `go`. |
+| `rearm` | Re-arm fault protection (SC RTS 4) after an automatic ABORT or HOLD. See [Fault Protection](#fault-protection). |
+| `trace-on` / `trace-off` | Show / hide the per-cycle `GNC #` line in the cFS console (EVS DEBUG events for GNC_APP). |
 
 ### Typical Sequence
 
@@ -186,7 +188,7 @@ The cFS EVS log (printed to the terminal running `./core-cpu1`) is the primary d
 | `GNC_APP initialized...` | 1 | App started OK. Guidance is pre-latched. |
 | `SIM_IO: listening for SimLink frames on port 5005` | SIM_IO 5 | Recv socket bound. Frames can now arrive from Unity. |
 | `RCS initialized: ...` | RCS 1 | Thruster table loaded; allocation ready. |
-| `GNC #N [PHASE] Rng=... P=... L=...` | 2 | One per lock-step cycle. Phase, nav state, and the impulse requested from RCS. |
+| `GNC #N [PHASE] Rng=... P=... L=...` | 2 | One per lock-step cycle, only after `gnc_cmd.py trace-on` (DEBUG). Phase, nav state, and the impulse requested from RCS. |
 | `GNC mode: X → Y` | 11 | Phase transition. Includes lateral offset and range at the moment of transition. |
 | `GNC_APP: NOOP` | 12 | NOOP received and accepted. |
 | `GNC_APP: counters reset` | 13 | RESET_COUNTERS accepted. |
@@ -200,6 +202,39 @@ The cFS EVS log (printed to the terminal running `./core-cpu1`) is the primary d
 | `GNC_APP: HOLD POINT 2 — braking to ...` | 22 | Autonomous inner hold point (3 m default) reached during APPROACH. |
 | `SIM_IO: rejected N-byte frame (bad ...)` | 6 | Unity and cFS disagree on the SimLink format — rebuild both from the same commit. |
 | `GNC_APP: CREW MANUAL TAKEOVER (hand controller)` | 29 | A hand-controller key was pressed; GNC is flying the sticks (MANUAL) until GO. |
+| `GNC_APP: sim link restored at Seq N after N s` | 28 | SIM_STATEs are flowing again after a gap. Guidance stays however FDIR left it. |
+| `SC 73: RTS Number 001 Started` … `LC 28: Set LC state command: new state = 1` | — | Boot: fault protection armed. If these are missing, FDIR is off. |
+| `LC 1000: GNC sim link loss: ABORT : AP = 0 …` | LC 1000 | Fault protection saw ≥ 2 s of sim silence and started RTS 2 (GNC ABORT). |
+| `LC 1001: Axial under-delivery: HOLD : AP = 1 …` | LC 1001 | Axial burns delivered < 50 % of predicted Δv for 3 cycles on approach; RTS 3 (GNC HOLD). |
+| `LC 60: AP failed while passive` | LC 60 | The fault is still present but the response already ran. Run `rearm` once recovered. |
+| `HS …: App Monitor Failure: APP:(NAME): Action: Event Only` | HS | A flight app stopped running (hung), not just a paused sim. |
+
+---
+
+## Fault Protection
+
+cFS watches for two faults on its own. The response is the same command you would send, and it arrives as an event in the log and on the ground console's FDIR panel:
+
+| Fault | Detected when | Automatic response |
+|-------|---------------|--------------------|
+| Sim link loss | No SIM_STATE for 2 s while not docked and not already aborted (fires about 4 s after Unity stops) | **ABORT** |
+| Axial thruster under-delivery | During APPROACH, 3 cycles in a row where axial burns change closing speed by less than half the prediction | **HOLD** |
+
+After an automatic response, recover the way you would from your own ABORT or HOLD (fix the cause, then `go`), **and** send `python3 gnc_cmd.py rearm`. A response only fires once until it is re-armed. The ground console's FDIR panel shows each response as `ACTIVE` (armed) or `PASSIVE` (fired, needs re-arm). Pausing Unity for more than a few seconds while guidance is active counts as link loss by design. Expect an ABORT when you unpause.
+
+How it works and how to change it: Docs/DEV_REFERENCE.md, *Fault Protection*.
+
+---
+
+## Flight Data
+
+- **Ground console** (`python3 ground_console.py`, http://localhost:8080) writes every per-cycle STATE packet to `run_logs/gnc_state_<time>.csv`.
+- **Onboard recorder (DS)** writes `cf/fdr_gnc<seq>.dat` (STATE, valve commands, GNC/RCS/SIM_IO/LC/SC HK) and `cf/fdr_evs<seq>.dat` (all events) next to `core-cpu1`. Each run overwrites the previous one, so copy the files off first to keep them. Decode them with:
+
+```bash
+python3 tools/fdr_decode.py build-native_std/exe/cpu1/cf/fdr_gnc00000001.dat
+# -> .gnc_state.csv, .thruster_cmd.csv, .gnc_hk.csv  (fdr_evs -> .events.txt)
+```
 
 ---
 

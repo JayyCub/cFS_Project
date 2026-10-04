@@ -1,4 +1,4 @@
-# SimLink ICD — Unity ⇄ cFS interface (v4)
+# SimLink ICD — Unity ⇄ cFS interface (v5)
 
 SimLink is the interface between the Unity simulation (the physical world and vehicle hardware) and cFS (the flight software). On the cFS side, only the **SIM_IO** app talks to it. Every other app sees ordinary Software Bus messages, the same way flight apps see device data that a hardware I/O app publishes.
 
@@ -32,7 +32,7 @@ Header (24 B) | payload | Trailer (4 B)
 | Offset | Type | Field | Notes |
 |---|---|---|---|
 | 0 | u32 | Sync | `0x324B4C53`, the ASCII bytes `SLK2` on the wire |
-| 4 | u16 | Version | `4` |
+| 4 | u16 | Version | `5` |
 | 6 | u16 | Type | `1` = SIM_STATE, `3` = THRUSTER_CMD (`2`, the v2 WRENCH_CMD, is retired) |
 | 8 | u32 | Seq | Unity's GNC-cycle counter, starting at 1. A THRUSTER_CMD echoes the Seq of the SIM_STATE it answers |
 | 12 | u32 | Length | Total frame length in bytes, including header and trailer |
@@ -47,23 +47,24 @@ Header (24 B) | payload | Trailer (4 B)
 
 The receiver drops any frame whose sync word, version, type, length or CRC is wrong. It counts the drop (SIM_IO HK `RxBadFrame`/`RxBadCrc`; Unity `UdpCommandReceiver.FramesBad`) and never applies the frame.
 
-## SIM_STATE payload (88 B, frame 116 B)
+## SIM_STATE payload (104 B, frame 132 B)
 
 Raw sensor readings, sampled at the cycle boundary by `ChaserSensors.cs` (realism phase 4). Nothing computed from truth goes to flight software: the cFS **NAV** app turns these readings into the navigation solution GNC flies on. Unity's `RelativeNav` still computes the truth values, but only for the HUD, the docking mechanism and the truth log.
 
 | Offset | Type | Field | Units / frame |
 |---|---|---|---|
 | 0 | f32 | CycleDt_s | Sim seconds one GNC cycle covers |
-| 4 | u32 | SensorValid | bit 0 IMU, bit 1 star tracker, bit 2 LIDAR: the device produced a reading this cycle |
+| 4 | u32 | SensorValid | bit 0 IMU, bit 1 star tracker, bit 2 LIDAR, bit 3 LIDAR pose: the device produced a reading this cycle |
 | 8 | f32×3 | GyroRate_B | Body angular rate (rad/s) |
 | 20 | f32×3 | DeltaV_B | Non-gravitational Δv over the cycle that just ended, body (m/s). Thrust and contact; free fall reads zero |
 | 32 | f32×4 | StQuat | Star tracker attitude q_L_B (x, y, z, w): rotates body vectors into LVLH |
 | 48 | f32 | RpsRange_m | LIDAR range from its mount to the target port reflector |
 | 52 | f32 | RpsAz_rad | Azimuth, atan2(x, z) in the sensor frame (boresight +Z) |
 | 56 | f32 | RpsEl_rad | Elevation, asin(y / range) |
-| 60 | u32 | MechFlags | bit 0 soft-capture latches engaged |
-| 64 | f32×3 | Thc | Crew translation hand controller, body X/Y/Z, −1..+1 |
-| 76 | f32×3 | Rhc | Crew rotation hand controller, pitch/yaw/roll, −1..+1 |
+| 60 | f32×4 | RpsQuat | LIDAR pose solution q_S_TP (x, y, z, w): the target port's axes in the sensor frame (v5) |
+| 76 | u32 | MechFlags | bit 0 soft-capture latches engaged |
+| 80 | f32×3 | Thc | Crew translation hand controller, body X/Y/Z, −1..+1 |
+| 92 | f32×3 | Rhc | Crew rotation hand controller, pitch/yaw/roll, −1..+1 |
 
 **Frames.** Body = the chaser vehicle transform's axes with the origin at the centre of mass, the same frame as the RCS thruster table. LVLH = Unity world axes (mapping below). The LIDAR frame is its mount's transform, the chaser docking port by default.
 
@@ -71,10 +72,13 @@ Raw sensor readings, sampled at the cycle boundary by `ChaserSensors.cs` (realis
 
 | Sensor | Noise, 1-sigma | Limits |
 |---|---|---|
-| Gyro | 1e-5 rad/s per sample, optional bias | none |
-| Accelerometer Δv | 1e-5 m/s per cycle, optional bias | CW gravity taken out (`ClohessyWiltshire.LastAccel`) |
+| Gyro | 1e-5 rad/s per sample; bias (1.5, −1.0, 2.0)e-6 rad/s (~0.3–0.4 °/h) | none |
+| Accelerometer Δv | 1e-5 m/s per cycle; bias (2.0, −1.5, 3.0)e-5 m/s² (2–3 µg) | CW gravity taken out (`ClohessyWiltshire.LastAccel`) |
 | Star tracker | 5e-5 rad (~10 arcsec) per axis | none |
 | LIDAR | range 5 mm + 0.1 % of range, az/el 0.5 mrad | 0.3–250 m, 35° half-angle field of view |
+| LIDAR pose | 3e-3 rad (~0.17°) per axis | inside 30 m |
+
+The biases are constant and unknown to flight software: NAV estimates them (gyro bias in the attitude filter, accelerometer bias in the translation filter).
 
 Noise comes from a seeded generator, so lock-stepped runs stay repeatable. The Inspector's *Fault injection* switches drop a sensor's valid bit to test NAV's degraded modes.
 

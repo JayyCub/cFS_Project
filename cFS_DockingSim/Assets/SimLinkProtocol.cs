@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 
 /// <summary>
-/// SimLink v4 — wire format between this simulation (the vehicle "hardware") and
+/// SimLink v5 — wire format between this simulation (the vehicle "hardware") and
 /// cFS's SIM_IO app. Mirrors cFS/apps/sim_io/fsw/inc/simlink_icd.h; see
 /// Docs/SIMLINK_ICD.md.
 ///
@@ -20,11 +20,13 @@ using UnityEngine;
 /// v4: SIM_STATE carries raw sensor readings (ChaserSensors: IMU, star tracker,
 /// relative-pose LIDAR, capture switches) instead of truth-derived navigation;
 /// the cFS NAV app does the navigation.
+///
+/// v5: the LIDAR also reports its pose solution (target port orientation, RpsQuat).
 /// </summary>
 public static class SimLinkProtocol
 {
     public const uint   Sync    = 0x324B4C53; // 'S','L','K','2' on the wire
-    public const ushort Version = 4;
+    public const ushort Version = 5;
 
     public const ushort TypeSimState    = 1; // Unity -> cFS
     public const ushort TypeThrusterCmd = 3; // cFS -> Unity (type 2 = v2 WRENCH_CMD, retired)
@@ -33,16 +35,17 @@ public static class SimLinkProtocol
 
     public const int HeaderBytes      = 24;
     public const int TrailerBytes     = 4;
-    public const int SimStateBytes    = 88;
+    public const int SimStateBytes    = 104;
     public const int ThrusterCmdBytes = 8 + 4 * NumThrusters; // 72
 
-    public const int SimStateFrameBytes    = HeaderBytes + SimStateBytes + TrailerBytes;    // 116
+    public const int SimStateFrameBytes    = HeaderBytes + SimStateBytes + TrailerBytes;    // 132
     public const int ThrusterCmdFrameBytes = HeaderBytes + ThrusterCmdBytes + TrailerBytes; // 100
 
     // SensorValid bits: the device produced a reading this cycle
     public const uint SensorImu = 0x1; // GyroRate_B + DeltaV_B
     public const uint SensorSt  = 0x2; // StQuat
     public const uint SensorRps = 0x4; // RpsRange/Az/El (target in field of view and range)
+    public const uint SensorRpsPose = 0x8; // RpsQuat (close enough for a pose solution)
 
     // MechFlags bits: docking-mechanism switches
     public const uint MechCapture = 0x1; // soft-capture latches engaged
@@ -61,6 +64,7 @@ public static class SimLinkProtocol
         public float      RpsRange_m;   // LIDAR line of sight to the target port, sensor frame:
         public float      RpsAz_rad;    //   Az = atan2(x, z)
         public float      RpsEl_rad;    //   El = asin(y / range)
+        public Quaternion RpsQuat;      // LIDAR pose: target port rotation in the sensor frame
         public uint       MechFlags;    // Mech* bits
         public Vector3    Thc;          // crew translation hand controller, body X/Y/Z, -1..+1
         public Vector3    Rhc;          // crew rotation hand controller (pitch/yaw/roll), -1..+1
@@ -88,6 +92,7 @@ public static class SimLinkProtocol
         off = PutF(buf, off, s.RpsRange_m);
         off = PutF(buf, off, s.RpsAz_rad);
         off = PutF(buf, off, s.RpsEl_rad);
+        off = PutQ(buf, off, s.RpsQuat);
         off = PutU32(buf, off, s.MechFlags);
         off = PutV(buf, off, s.Thc);
         off = PutV(buf, off, s.Rhc);

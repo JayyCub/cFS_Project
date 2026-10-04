@@ -81,8 +81,9 @@ GNC_FLAGS = {
 
 # NAV_HkTlm_t (nav_msg.h): CmdCount CmdErrCount CycleCount RpsAccepted RpsRejected
 # RpsUnavailable FilterInits SensorRejects Status LastInnovSigma PosSigma_m VelSigma_ms
-NAV_HK = struct.Struct("<9I3f")
-assert TLM_HDR_LEN + NAV_HK.size == 64
+# AttSigma_rad GyroBias_rads[3] AccelBias_mss[3] AttRejected
+NAV_HK = struct.Struct("<9I4f3f3fI")
+assert TLM_HDR_LEN + NAV_HK.size == 96
 NAV_STATUS = {  # nav_status.h
     0x01: "ATT",
     0x02: "RATE",
@@ -92,6 +93,8 @@ NAV_STATUS = {  # nav_status.h
     0x20: "LIDAR_REJ",
     0x40: "DV",
     0x80: "ST",
+    0x100: "POSE",
+    0x200: "ATT_REJ",
 }
 
 # LC_HkTlm_t: CmdCount CmdErrCount CurrentLCState Pad8, WPResults[44], APResults[88]
@@ -100,7 +103,8 @@ LC_OFF_APRESULTS = TLM_HDR_LEN + 4 + 44
 LC_STATES = {1: "ACTIVE", 2: "PASSIVE", 3: "DISABLED"}
 LC_AP_STATES = {0: "UNUSED", 1: "ACTIVE", 2: "PASSIVE", 3: "DISABLED"}
 LC_AP_RESULTS = {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "STALE"}
-FDIR_APS = {0: "Link loss -> ABORT", 1: "Axial anomaly -> HOLD"}  # lc_def_adt.c
+FDIR_APS = {0: "Link loss -> ABORT", 1: "Axial anomaly -> HOLD",  # lc_def_adt.c
+            2: "NAV lost on approach -> ABORT", 3: "LIDAR rejects -> HOLD"}
 
 RUN_LOG_DIR = Path(__file__).parent / "run_logs"
 
@@ -264,7 +268,7 @@ def _decode_nav_hk(data: bytes):
     if len(data) < TLM_HDR_LEN + NAV_HK.size:
         return None
     (_, _, _, rps_ok, rps_rej, rps_none, inits, sens_rej, status,
-     innov, pos_sig, vel_sig) = NAV_HK.unpack_from(data, TLM_HDR_LEN)
+     innov, pos_sig, vel_sig, att_sig, gbx, gby, gbz, abx, aby, abz, att_rej) = NAV_HK.unpack_from(data, TLM_HDR_LEN)
     return {
         "nav_status": [name for bit, name in NAV_STATUS.items() if status & bit],
         "nav_relnav": bool(status & 0x04),
@@ -276,6 +280,11 @@ def _decode_nav_hk(data: bytes):
         "nav_sensor_rej": sens_rej,
         "nav_innov": innov,
         "nav_sigma": [pos_sig, vel_sig],
+        "nav_att_sigma": att_sig,
+        "nav_att_rej": att_rej,
+        "nav_pose": bool(status & 0x100),
+        "nav_gyro_bias": [gbx, gby, gbz],
+        "nav_accel_bias": [abx, aby, abz],
     }
 
 

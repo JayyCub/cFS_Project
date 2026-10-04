@@ -212,6 +212,9 @@ The cFS EVS log (printed to the terminal running `./core-cpu1`) is the primary d
 | `SC 73: RTS Number 001 Started` … `LC 28: Set LC state command: new state = 1` | — | Boot: fault protection armed. If these are missing, FDIR is off. |
 | `LC 1000: GNC sim link loss: ABORT : AP = 0 …` | LC 1000 | Fault protection saw ≥ 2 s of sim silence and started RTS 2 (GNC ABORT). |
 | `LC 1001: Axial under-delivery: HOLD : AP = 1 …` | LC 1001 | Axial burns delivered < 50 % of predicted Δv for 3 cycles on approach; RTS 3 (GNC HOLD). |
+| `LC 1002: NAV lost on approach: ABORT …` | LC 1002 | NAV's relative solution was unusable for 2 s during APPROACH; RTS 2 (GNC ABORT). |
+| `LC 1003: LIDAR fixes rejected: HOLD …` | LC 1003 | 5 LIDAR fixes in a row failed NAV's gate during APPROACH; RTS 3 (GNC HOLD). |
+| `NAV: attitude filter initialised from the star tracker` | NAV 16 | First attitude fix. The gyro bias estimate settles over the first minute or two. |
 | `LC 60: AP failed while passive` | LC 60 | The fault is still present but the response already ran. Run `rearm` once recovered. |
 | `HS …: App Monitor Failure: APP:(NAME): Action: Event Only` | HS | A flight app stopped running (hung), not just a paused sim. |
 
@@ -225,6 +228,8 @@ cFS watches for two faults on its own. The response is the same command you woul
 |-------|---------------|--------------------|
 | Sim link loss | No SIM_STATE for 2 s while not docked and not already aborted (fires about 4 s after Unity stops) | **ABORT** |
 | Axial thruster under-delivery | During APPROACH, 3 cycles in a row where the accelerometer measures less than half the Δv the axial burns should have given | **HOLD** |
+| Navigation lost on approach | During APPROACH, NAV's relative solution unusable for 10 cycles (2 s) in a row | **ABORT** |
+| LIDAR disagreeing on approach | During APPROACH, 5 LIDAR fixes in a row rejected by NAV's innovation gate | **HOLD** |
 
 After an automatic response, recover the way you would from your own ABORT or HOLD (fix the cause, then `go`), **and** send `python3 gnc_cmd.py rearm`. A response only fires once until it is re-armed. The ground console's FDIR panel shows each response as `ACTIVE` (armed) or `PASSIVE` (fired, needs re-arm). Pausing Unity for more than a few seconds while guidance is active counts as link loss by design. Expect an ABORT when you unpause.
 
@@ -239,7 +244,7 @@ Since realism phase 4, cFS does its own navigation. Unity sends raw sensor readi
 - **After pressing Play, GNC needs a few seconds.** NAV initialises from the first LIDAR fix and reports relative nav VALID once its velocity estimate has converged (about 2–6 s, longer from far away). Until then the ground console's NAV panel reads `CONVERGING`, and a GO only holds attitude.
 - **The HUD and the ground console can differ slightly.** The Unity HUD shows truth. The ground console shows what flight software believes: millimetres apart up close, a centimetre or two at 40 m.
 
-The ground console's NAV panel shows whether relative nav is valid, the position and velocity uncertainty (σ), how many LIDAR fixes were used or rejected, and how far off the last one was (innovation, in σ). Values under about 3 σ are normal. To test degraded modes, tick the *Fault injection* boxes on the `ChaserSensors` component (added to the UdpTelemetrySender object at runtime) in Play mode.
+The ground console's NAV panel shows whether relative nav is valid, the position, velocity and attitude uncertainty (σ), how many LIDAR fixes were used or rejected, how far off the last one was (innovation, in σ; under about 3 is normal), and NAV's running estimate of the gyro and accelerometer biases. The Unity defaults are about 0.3–0.4 °/h and 2–3 µg per axis; NAV's numbers should drift toward those over a few minutes. To test degraded modes, tick the *Fault injection* boxes on the `ChaserSensors` component (added to the UdpTelemetrySender object at runtime) in Play mode.
 
 ---
 

@@ -475,6 +475,9 @@
       <div class="panel-title" style="margin-bottom:8px;">NAV (sensors → filter)</div>
       <div class="fdir-row"><span class="lbl">Relative nav</span><span id="nav-rel">---</span></div>
       <div class="fdir-row"><span class="lbl">Attitude</span><span id="nav-att">---</span></div>
+      <div class="fdir-row"><span class="lbl">σ attitude</span><span id="nav-att-sigma">---</span></div>
+      <div class="fdir-row"><span class="lbl">Gyro bias est. (°/h)</span><span id="nav-gbias">---</span></div>
+      <div class="fdir-row"><span class="lbl">Accel bias est. (µg)</span><span id="nav-abias">---</span></div>
       <div class="fdir-row"><span class="lbl">σ position / velocity</span><span id="nav-sigma">---</span></div>
       <div class="fdir-row"><span class="lbl">LIDAR used / rejected / no fix</span><span id="nav-rps">---</span></div>
       <div class="fdir-row"><span class="lbl">Last innovation</span><span id="nav-innov">---</span></div>
@@ -636,8 +639,14 @@ function updateGnc(d) {
   if (d.nav_rps) {
     set('nav-rel', d.nav_relnav ? 'VALID' : d.nav_filter ? 'CONVERGING / DEGRADED' : 'NO LIDAR FIX',
         d.nav_relnav ? 'green' : 'yellow');
-    set('nav-att', !d.nav_att ? 'LOST' : d.nav_st ? 'STAR TRACKER' : 'GYRO PROPAGATED',
+    set('nav-att', !d.nav_att ? 'LOST' : d.nav_st ? (d.nav_pose ? 'STAR TRACKER + LIDAR POSE' : 'STAR TRACKER')
+                   : d.nav_pose ? 'LIDAR POSE ONLY' : 'GYRO PROPAGATED',
         !d.nav_att ? 'red' : d.nav_st ? 'green' : 'yellow');
+    if (d.nav_gyro_bias) {
+      set('nav-att-sigma', `${(d.nav_att_sigma * 180 / Math.PI).toFixed(4)}°`, 'gray');
+      set('nav-gbias', d.nav_gyro_bias.map(b => (b * 180 / Math.PI * 3600).toFixed(2)).join(' / '), 'gray');
+      set('nav-abias', d.nav_accel_bias.map(b => (b / 9.80665 * 1e6).toFixed(1)).join(' / '), 'gray');
+    }
     set('nav-sigma', `${(d.nav_sigma[0] * 100).toFixed(1)} cm / ${(d.nav_sigma[1] * 1000).toFixed(2)} mm/s`, 'gray');
     set('nav-rps', d.nav_rps.join(' / '), d.nav_rps[1] > 0 ? 'yellow' : 'gray');
     set('nav-innov', `${d.nav_innov.toFixed(1)} σ`, d.nav_innov > 4 ? 'yellow' : 'gray');

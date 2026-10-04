@@ -11,7 +11,8 @@ using UnityEngine;
 ///                  Clohessy-Wiltshire gravity ClohessyWiltshire.cs applies is taken back out)
 ///   star tracker   body attitude quaternion in LVLH (= world in this sim)
 ///   LIDAR          range / azimuth / elevation from the mount to the target port reflector,
-///                  only inside its field of view and range limits
+///                  only inside its field of view and range limits; inside its pose range it
+///                  also solves the target port's orientation relative to the sensor
 ///   capture        soft-capture latch switch (DockingDetector)
 ///
 /// Noise is Gaussian from a seeded generator, so lock-stepped runs stay repeatable. The noise
@@ -38,10 +39,14 @@ public class ChaserSensors : MonoBehaviour
     [Header("IMU (at the centre of mass)")]
     [Tooltip("Gyro noise per sample, 1-sigma (rad/s). 1e-5 ≈ a navigation-grade FOG.")]
     public float   gyroNoise_rads   = 1e-5f;
-    public Vector3 gyroBias_rads    = Vector3.zero;
+    [Tooltip("Constant gyro bias (rad/s). The default, ~0.3-0.4 deg/h per axis, is a tactical-grade " +
+             "unit — flight software has to estimate it (NAV attitude filter).")]
+    public Vector3 gyroBias_rads    = new Vector3(1.5e-6f, -1.0e-6f, 2.0e-6f);
     [Tooltip("Accelerometer Δv noise per GNC cycle, 1-sigma (m/s).")]
     public float   accelDvNoise_ms  = 1e-5f;
-    public Vector3 accelBias_mss    = Vector3.zero;
+    [Tooltip("Constant accelerometer bias (m/s²). The default, 2-3 micro-g, would walk the velocity " +
+             "estimate off by ~1 mm/s per minute if flight software didn't estimate it.")]
+    public Vector3 accelBias_mss    = new Vector3(2.0e-5f, -1.5e-5f, 3.0e-5f);
 
     [Header("Star tracker")]
     [Tooltip("Attitude noise per axis, 1-sigma (rad). 5e-5 ≈ 10 arcsec.")]
@@ -56,6 +61,11 @@ public class ChaserSensors : MonoBehaviour
     public float rpsMaxRange_m       = 250f;
     [Tooltip("Half-angle of the field of view about the boresight (deg).")]
     public float rpsHalfFov_deg      = 35f;
+    [Tooltip("The pose solution (target port orientation) needs the reflector pattern resolved: " +
+             "only inside this range (m).")]
+    public float rpsPoseMaxRange_m   = 30f;
+    [Tooltip("Pose solution orientation noise per axis, 1-sigma (rad). 3e-3 ≈ 0.17 deg.")]
+    public float rpsPoseNoise_rad    = 3e-3f;
 
     [Header("Fault injection")]
     public bool imuFailed;
@@ -132,6 +142,13 @@ public class ChaserSensors : MonoBehaviour
                 s.RpsAz_rad  = Mathf.Atan2(p.x, p.z) + Gauss() * rpsAngleNoise_rad;
                 s.RpsEl_rad  = Mathf.Asin(p.y / range) + Gauss() * rpsAngleNoise_rad;
                 valid |= SimLinkProtocol.SensorRps;
+
+                if (range <= rpsPoseMaxRange_m)
+                {
+                    s.RpsQuat = Quaternion.Inverse(mount.rotation) * targetPort.rotation *
+                                SmallRotation(Noise3(rpsPoseNoise_rad));
+                    valid |= SimLinkProtocol.SensorRpsPose;
+                }
             }
         }
 

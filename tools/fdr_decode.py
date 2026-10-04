@@ -54,20 +54,22 @@ GNC_HK = struct.Struct("<IIIIBBHI")
 GNC_HK_FIELDS = ["cmd_count", "cmd_err_count", "cycle_count", "sim_state_count", "phase", "flags", "spare",
                  "tlm_stale_sec"]
 
-NAV_SOLUTION = struct.Struct("<dIfII4f3f3f3f3f3f3f3f3f2f")
-assert NAV_SOLUTION.size == 144
+NAV_SOLUTION = struct.Struct("<dIfIHH4f3f3f3f3f3f3f3f3f2f2f")
+assert NAV_SOLUTION.size == 152
 NAV_SOLUTION_FIELDS = (
-    ["sim_time", "seq", "cycle_dt", "status", "spare", "q_x", "q_y", "q_z", "q_w",
+    ["sim_time", "seq", "cycle_dt", "status", "consec_rps_rejects", "spare", "q_x", "q_y", "q_z", "q_w",
      "rate_x", "rate_y", "rate_z", "atterr_x_rad", "atterr_y_rad", "atterr_z_rad",
      "cm_pos_x", "cm_pos_y", "cm_pos_z", "cm_vel_x", "cm_vel_y", "cm_vel_z",
      "port_pos_x", "port_pos_y", "port_pos_z", "port_vel_x", "port_vel_y", "port_vel_z",
-     "range_m", "closing_ms", "lateral_m", "dv_x", "dv_y", "dv_z", "pos_sigma_m", "vel_sigma_ms"]
+     "range_m", "closing_ms", "lateral_m", "dv_x", "dv_y", "dv_z", "pos_sigma_m", "vel_sigma_ms",
+     "att_sigma_rad", "spare2"]
 )
 
-NAV_HK = struct.Struct("<9I3f")
+NAV_HK = struct.Struct("<9I4f3f3fI")
 NAV_HK_FIELDS = ["cmd_count", "cmd_err_count", "cycle_count", "rps_accepted", "rps_rejected",
                  "rps_unavailable", "filter_inits", "sensor_rejects", "status", "last_innov_sigma",
-                 "pos_sigma_m", "vel_sigma_ms"]
+                 "pos_sigma_m", "vel_sigma_ms", "att_sigma_rad", "gyro_bias_x", "gyro_bias_y", "gyro_bias_z",
+                 "accel_bias_x", "accel_bias_y", "accel_bias_z", "att_rejected"]
 
 N_THR = 16
 THRUSTER_CMD = struct.Struct(f"<IIIi{N_THR}f3f3f")

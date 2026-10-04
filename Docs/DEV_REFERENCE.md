@@ -35,7 +35,7 @@ RelativeNav.cs   → TRUTH (HUD, capture only)
 |------|-------------|-----------|
 | `cFS/apps/gnc_app/fsw/src/gnc_app.c` | Phase state machine, control law, wakeup handler | Adding phases, changing guidance logic |
 | `cFS/apps/sim_io/` | Device I/O app — owns the Unity sockets, SimLink framing, lock-step `SIM_STATE`/`THRUSTER_CMD` SB messages | Changing packet format or network topology (see `Docs/SIMLINK_ICD.md`) |
-| `cFS/apps/nav/` | Navigation — CW Kalman filter (IMU-propagated, LIDAR-updated), docking-frame port position/velocity, quaternion attitude error; geometry + sensor model in `nav_cfg_tbl.c`. `nav_filter.c` is cFE-free, with a stand-alone harness in `unit-test/` | Changing sensors, the estimator, or vehicle/port geometry |
+| `cFS/apps/nav/` | Navigation — attitude MEKF (gyro + bias, star tracker, LIDAR pose) and a 9-state CW Kalman filter (IMU-propagated with accelerometer bias, LIDAR-updated), docking-frame port position/velocity, quaternion attitude error; geometry + sensor model in `nav_cfg_tbl.c`. `nav_filter.c` is cFE-free, with a stand-alone harness in `unit-test/` | Changing sensors, the estimator, or vehicle/port geometry |
 | `cFS/apps/rcs/` | RCS manager — NNLS thruster allocation + PWM (min impulse bit, per-cycle max, saturation scaling) from `rcs_thr_tbl.c` | Changing thruster geometry, thrust, pulse limits, or the allocation algorithm |
 | `cFS/apps/gnc_app/fsw/src/gnc_app.h` | Internal enums, structs, constants, event IDs, prototypes | Adding new state or event IDs |
 | `cFS/apps/gnc_app/fsw/inc/gnc_app_msg.h` | Public interface: command codes, HK and per-cycle STATE packets (size-asserted) | Adding a telemetry field or command (then update LC tables / ground tools that read it) |
@@ -235,9 +235,9 @@ Flight software navigates for itself (realism phase 4). Unity's `ChaserSensors` 
 
 | Group | Source | Fields |
 |-------|--------|--------|
-| Attitude | star tracker (gyro-propagated for up to 10 s if it drops out) | `AttQuat_L`, `AttErr_B` (rotation vector to the docking attitude, from the table's `DockedQuat_TP`) |
-| Rates | gyro | `AngRate_B` |
-| Translation | 6-state Kalman filter in LVLH: CW dynamics + IMU Δv, LIDAR position fixes | `CmPos_L`, `CmVel_L` (chaser CoM − ISS reference) |
+| Attitude | MEKF: bias-corrected gyro propagation, star tracker and LIDAR-pose updates; valid while its σ ≤ `MaxAttSigma_rad` | `AttQuat_L`, `AttErr_B` (rotation vector to the docking attitude, from the table's `DockedQuat_TP`), `AttSigma_rad` |
+| Rates | gyro minus the estimated bias | `AngRate_B` |
+| Translation | 9-state Kalman filter in LVLH: CW dynamics + bias-corrected IMU Δv, LIDAR position fixes; states r, v, accelerometer bias | `CmPos_L`, `CmVel_L` (chaser CoM − ISS reference), `ConsecRpsRejects` |
 | Docking port | filter + attitude + table geometry, docking frame D | `PortPos_D`, `PortVel_D` (v_cm + ω×r), `Range_m`, `ClosingSpeed_ms`, `LateralOffset_m` |
 | Health | covariance and gates | `Status` (`NAV_STATUS_*`), `PosSigma_m`, `VelSigma_ms` |
 
@@ -270,6 +270,8 @@ The Unity scene is the real hardware and cFS tables are flight software's model 
 ---
 
 ## Fault Protection (FDIR: LC → SC)
+
+Actionpoints 2 and 3 (realism phase 4b) watch navigation: GNC STATE's `NAV_INVALID` flag for 10 cycles during APPROACH → RTS 2 (ABORT), and NAV SOLUTION's `ConsecRpsRejects ≥ 5` during APPROACH → RTS 3 (HOLD). Like AP 1 they're sampled by gnc_app at the end of each cycle (`GNC_APP_LC_CYCLE_AP_LAST` = 3).
 
 GNC measures, LC decides, SC responds. GNC publishes what it observes (`TlmStaleSec` in HK, `UnderDeliveryStreak` in the per-cycle STATE packet) and takes no fault action itself. LC watchpoints turn those fields into conditions, LC actionpoints combine them into flight rules, and a rule that fails starts an SC stored command sequence (RTS). The ABORT and HOLD they send are the same GNC commands the ground uses. Every threshold and response lives in a table under `cFS/sample_defs/cpu1/tables/`, so the flight rules can change without touching GNC code.
 

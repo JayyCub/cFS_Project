@@ -24,6 +24,10 @@ FDIR (realism phase 3 — LC watchpoints/actionpoints -> SC RTSs, wall-clock pac
   9. re-arm, GO, reach APPROACH, then burns
      that change nothing (frozen closing)    -> LC AP 1 -> SC RTS 3 -> GNC HOLD
 
+NAV fault protection (realism phase 4b):
+ 10. GO, reach APPROACH, IMU fails           -> NAV invalid 2 s -> LC AP 2 -> RTS 2 ABORT
+ 11. GO, reach APPROACH, chaser jumps 2 m    -> LIDAR fixes rejected -> LC AP 3 -> RTS 3 HOLD
+
 Usage (cFS running, SIM_IO DestHost resolving to this machine, CI_LAB on --ci-port):
     python3 tools/simlink_smoke.py [--host 127.0.0.1]
 
@@ -37,23 +41,25 @@ import sys
 import time
 
 SYNC = 0x324B4C53
-VERSION = 4
+VERSION = 5
 TYPE_SIM_STATE = 1
 TYPE_THRUSTER_CMD = 3
 N_THR = 16
 
 HDR = struct.Struct("<IHHIId")                 # 24 B
-STATE = struct.Struct("<fI3f3f4f3fI3f3f")      # 88 B
+STATE = struct.Struct("<fI3f3f4f3f4fI3f3f")    # 104 B
 THR = struct.Struct(f"<Ii{N_THR}f")            # 72 B
 TRL = struct.Struct("<HH")                     # 4 B
-assert HDR.size == 24 and STATE.size == 88 and THR.size == 72
+assert HDR.size == 24 and STATE.size == 104 and THR.size == 72
 
-SENSOR_IMU, SENSOR_ST, SENSOR_RPS = 0x1, 0x2, 0x4
+SENSOR_IMU, SENSOR_ST, SENSOR_RPS, SENSOR_RPS_POSE = 0x1, 0x2, 0x4, 0x8
+POSE_MAX_RANGE = 30.0
 CYCLE_DT = 0.2
 
 # Geometry, as in cFS nav_cfg_tbl.c: target port (= LIDAR reflector) relative to the ISS
 # reference point; the chaser docking port / LIDAR sit on body +Z ahead of the CoM.
 TARGET_PORT = (0.000005485832, -5.5613275, -16.092)
+TARGET_PORT_QUAT = (-0.70668393, 0.7075295, -0.00000087704393, -0.00000014301622)  # q_T_TP
 MEAN_MOTION = 0.00113
 
 PHASES = {0: "IDLE", 1: "CORRECT", 2: "APPROACH", 3: "DOCKED", 4: "HOLD", 5: "MANUAL"}
@@ -84,6 +90,7 @@ class Truth:
         self.pos = [lat[0], lat[1], -gap]
         self.vel = [0.0, 0.0, 0.0]
         self.pending = None
+        self.imu_ok = True
 
     def set_vel(self, vx=None, vy=None, vz=None):
         v = list(self.vel)
@@ -125,13 +132,18 @@ def sim_state_frame(seq, sim_time, truth, thc=(0, 0, 0), rhc=(0, 0, 0)):
     length = HDR.size + STATE.size + TRL.size
     dv = truth.step()
     rng, az, el = truth.lidar()
+    # LIDAR pose: chaser upright with the sensor on world axes, ISS at identity, so the
+    # target port's orientation in the sensor frame is just its table quaternion
+    pose = SENSOR_RPS_POSE if rng <= POSE_MAX_RANGE else 0
+    imu = SENSOR_IMU if truth.imu_ok else 0
     body = HDR.pack(SYNC, VERSION, TYPE_SIM_STATE, seq, length, sim_time) + STATE.pack(
         CYCLE_DT,
-        SENSOR_IMU | SENSOR_ST | SENSOR_RPS,
+        imu | SENSOR_ST | SENSOR_RPS | pose,
         0.0, 0.0, 0.0,                         # gyro: not rotating
         *dv,                                   # IMU Δv over the cycle
         0.0, 0.0, 0.0, 1.0,                    # star tracker: upright (identity)
         rng, az, el,                           # LIDAR
+        *TARGET_PORT_QUAT,                     # LIDAR pose (used only when flagged)
         0,                                     # mechanism: not captured
         *thc, *rhc,
     )
@@ -219,6 +231,17 @@ class Link:
     def silent(self, sec):
         """Stop the sim (as a paused/crashed Unity would) and wait."""
         time.sleep(sec)
+
+
+def approach(L):
+    """Cycle until GNC reaches APPROACH (settle gate: 15 steady cycles)."""
+    c = None
+    for _ in range(40):
+        c = L.cycle()
+        if c and c["phase"] == 2:
+            return c
+    L.fail("never reached APPROACH (settle gate)")
+    return None
 
 
 def fired(cmd):
@@ -348,6 +371,43 @@ def main():
             show("9b no IMU dv (LC AP1 -> RTS 3)", c)
         if not held:
             L.fail("expected FDIR HOLD after axial burns stopped delivering")
+
+    # 10. NAV lost on approach -> LC AP 2 -> RTS 2 ABORT. AP 1 fired in step 9 and is
+    #     not re-armed (PASSIVE), so the frozen-closing truth can't trigger it again.
+    L.ground(GNC_GO)
+    c = approach(L)
+    if c:
+        L.truth.imu_ok = False                  # RELNAV needs the IMU: NAV goes invalid
+        aborted = False
+        for _ in range(20):
+            c = L.cycle()
+            time.sleep(0.2)                     # SC runs RTSs on its 1 Hz wakeup
+            if c and c["phase"] == 0:
+                aborted = True
+                break
+        L.truth.imu_ok = True
+        if c:
+            show("10 IMU lost on approach (LC AP2)", c)
+        if not aborted:
+            L.fail("expected FDIR ABORT after NAV went invalid on approach")
+
+    # 11. LIDAR fixes rejected on approach -> LC AP 3 -> RTS 3 HOLD
+    L.paced(3)                                  # IMU back: NAV valid again
+    L.ground(GNC_GO)
+    c = approach(L)
+    if c:
+        L.truth.pos[2] -= 2.0                   # chaser "teleports" 2 m back
+        held = False
+        for _ in range(20):
+            c = L.cycle()
+            time.sleep(0.2)                     # SC runs RTSs on its 1 Hz wakeup
+            if c and c["phase"] == 4:
+                held = True
+                break
+        if c:
+            show("11 LIDAR jump on approach (LC AP3)", c)
+        if not held:
+            L.fail("expected FDIR HOLD after consecutive LIDAR rejections on approach")
 
     if L.rtts:
         r = sorted(L.rtts)

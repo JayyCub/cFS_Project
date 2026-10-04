@@ -472,6 +472,18 @@
     <div class="tlm-sep" style="margin-top:14px;"></div>
 
     <div style="margin-top:10px;">
+      <div class="panel-title" style="margin-bottom:8px;">NAV (sensors → filter)</div>
+      <div class="fdir-row"><span class="lbl">Relative nav</span><span id="nav-rel">---</span></div>
+      <div class="fdir-row"><span class="lbl">Attitude</span><span id="nav-att">---</span></div>
+      <div class="fdir-row"><span class="lbl">σ position / velocity</span><span id="nav-sigma">---</span></div>
+      <div class="fdir-row"><span class="lbl">LIDAR used / rejected / no fix</span><span id="nav-rps">---</span></div>
+      <div class="fdir-row"><span class="lbl">Last innovation</span><span id="nav-innov">---</span></div>
+      <div class="fdir-row"><span class="lbl">Filter inits / bad readings</span><span id="nav-inits">---</span></div>
+    </div>
+
+    <div class="tlm-sep" style="margin-top:14px;"></div>
+
+    <div style="margin-top:10px;">
       <div class="panel-title" style="margin-bottom:8px;">Phase Timeline</div>
       <div id="phase-history" style="font-size:11px;color:var(--textdim);line-height:1.8;"></div>
     </div>
@@ -619,6 +631,18 @@ function updateGnc(d) {
   stEl.className = streak >= 3 ? 'red' : streak > 0 ? 'yellow' : 'green';
   const stale   = d.stale_sec ?? 0;
   const cmdErr  = d.cmd_err  ?? 0;
+
+  // NAV (1 Hz HK)
+  if (d.nav_rps) {
+    set('nav-rel', d.nav_relnav ? 'VALID' : d.nav_filter ? 'CONVERGING / DEGRADED' : 'NO LIDAR FIX',
+        d.nav_relnav ? 'green' : 'yellow');
+    set('nav-att', !d.nav_att ? 'LOST' : d.nav_st ? 'STAR TRACKER' : 'GYRO PROPAGATED',
+        !d.nav_att ? 'red' : d.nav_st ? 'green' : 'yellow');
+    set('nav-sigma', `${(d.nav_sigma[0] * 100).toFixed(1)} cm / ${(d.nav_sigma[1] * 1000).toFixed(2)} mm/s`, 'gray');
+    set('nav-rps', d.nav_rps.join(' / '), d.nav_rps[1] > 0 ? 'yellow' : 'gray');
+    set('nav-innov', `${d.nav_innov.toFixed(1)} σ`, d.nav_innov > 4 ? 'yellow' : 'gray');
+    set('nav-inits', `${d.nav_inits} / ${d.nav_sensor_rej}`, d.nav_inits > 1 || d.nav_sensor_rej > 0 ? 'yellow' : 'gray');
+  }
 
   // Closing speed
   const closingOk = closing > 0 && closing <= 0.30;

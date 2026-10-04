@@ -11,18 +11,19 @@ The autopilot is split across two codebases that talk over UDP:
 ```
 Unity (Mac)                                  cFS (Docker)
 ───────────────────────────────────          ─────────────────────────────────
-RelativeNav.cs   → builds nav state          sim_io       → SimLink UDP ⇄ Software Bus
-VehicleState.cs  → Rigidbody wrapper         gnc_app.c    → SelectPhase(), ComputeControl()
-RCSModel.cs      → 16 thruster valves        rcs          → allocation + PWM (thruster table)
-HandController.cs→ crew sticks (keyboard)    gnc_app_tbl.h→ tunable gains, mass properties
-ClohessyWiltshire.cs → orbital drift         rcs_tbl.h    → thruster geometry, pulse limits
+ChaserSensors.cs → IMU, star tracker, LIDAR  sim_io       → SimLink UDP ⇄ Software Bus
+VehicleState.cs  → Rigidbody wrapper         nav          → Kalman filter: sensors → nav solution
+RCSModel.cs      → 16 thruster valves        gnc_app.c    → SelectPhase(), ComputeControl()
+HandController.cs→ crew sticks (keyboard)    rcs          → allocation + PWM (thruster table)
+ClohessyWiltshire.cs → orbital drift         *_tbl.h      → geometry, gains, mass, thruster table
+RelativeNav.cs   → TRUTH (HUD, capture only)
                       ←──────────────────────────────────
-                         SIM_STATE (port 5005, every 0.2 s sim time, 132 B)
+                         SIM_STATE (port 5005, every 0.2 s sim time, 116 B, raw sensors)
                       ──────────────────────────────────→
                          THRUSTER_CMD (port 5006, answers each SIM_STATE — lock-step, 100 B)
 ```
 
-**GNC runs once per SIM_STATE (5 Hz of sim time), in lock-step with Unity's 50 Hz physics. `GNC_APP_ComputeControl()` outputs the impulse it wants this cycle: P = m·Δv and L = I·Δω, body frame. The cFS `rcs` app allocates that across the thrusters with NNLS over its thruster table and converts it to per-valve on-times, honoring the minimum impulse bit and the per-cycle maximum. Unity just opens each valve for its on-time at full thrust. See [SIMLINK_ICD.md](SIMLINK_ICD.md) and [RCS_THRUSTER_REFERENCE.md](RCS_THRUSTER_REFERENCE.md).**
+**Each SIM_STATE (5 Hz of sim time, lock-step with Unity's 50 Hz physics) runs one chain on the Software Bus: `nav` turns the raw sensor readings into a navigation solution, then GNC runs once on that solution. `GNC_APP_ComputeControl()` outputs the impulse it wants this cycle: P = m·Δv and L = I·Δω, body frame. The cFS `rcs` app allocates that across the thrusters with NNLS over its thruster table and converts it to per-valve on-times, honoring the minimum impulse bit and the per-cycle maximum. Unity just opens each valve for its on-time at full thrust. See [SIMLINK_ICD.md](SIMLINK_ICD.md) and [RCS_THRUSTER_REFERENCE.md](RCS_THRUSTER_REFERENCE.md).**
 
 ---
 
@@ -34,18 +35,20 @@ ClohessyWiltshire.cs → orbital drift         rcs_tbl.h    → thruster geometr
 |------|-------------|-----------|
 | `cFS/apps/gnc_app/fsw/src/gnc_app.c` | Phase state machine, control law, wakeup handler | Adding phases, changing guidance logic |
 | `cFS/apps/sim_io/` | Device I/O app — owns the Unity sockets, SimLink framing, lock-step `SIM_STATE`/`THRUSTER_CMD` SB messages | Changing packet format or network topology (see `Docs/SIMLINK_ICD.md`) |
+| `cFS/apps/nav/` | Navigation — CW Kalman filter (IMU-propagated, LIDAR-updated), docking-frame port position/velocity, quaternion attitude error; geometry + sensor model in `nav_cfg_tbl.c`. `nav_filter.c` is cFE-free, with a stand-alone harness in `unit-test/` | Changing sensors, the estimator, or vehicle/port geometry |
 | `cFS/apps/rcs/` | RCS manager — NNLS thruster allocation + PWM (min impulse bit, per-cycle max, saturation scaling) from `rcs_thr_tbl.c` | Changing thruster geometry, thrust, pulse limits, or the allocation algorithm |
 | `cFS/apps/gnc_app/fsw/src/gnc_app.h` | Internal enums, structs, constants, event IDs, prototypes | Adding new state or event IDs |
 | `cFS/apps/gnc_app/fsw/inc/gnc_app_msg.h` | Public interface: command codes, HK and per-cycle STATE packets (size-asserted) | Adding a telemetry field or command (then update LC tables / ground tools that read it) |
 | `cFS/sample_defs/cpu1/tables/` | Mission FDIR + recorder tables: LC watchpoints/actionpoints, SC RTS 1–4, DS recorder, HS app monitor | Changing a fault threshold, response, or what gets recorded |
-| `cFS/apps/gnc_app/fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` — 24 tunable gain/physical-constant fields | Adding new gains you want in the table |
+| `cFS/apps/gnc_app/fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` — tunable gains, mass properties, `LatVelAtPort` | Adding new gains you want in the table |
 | `cFS/apps/gnc_app/fsw/tables/gnc_param_tbl.c` | Default values for the gain table | Changing defaults at compile time |
 
 ### Unity Side (C#)
 
 | File | What it does | Edit when |
 |------|-------------|-----------|
-| `cFS_DockingSim/Assets/RelativeNav.cs` | Computes range, closing speed, lateral offset, scalar + per-axis attitude error | Changing what navigation data is available |
+| `cFS_DockingSim/Assets/ChaserSensors.cs` | Sensor hardware: gyro, accelerometer Δv, star tracker, LIDAR, capture switch, with noise and fault injection; "Log cFS NAV table" context menu (Play mode) regenerates `nav_cfg_tbl.c` geometry. Added at runtime by `UdpTelemetrySender` | Changing a sensor, its noise or mounting |
+| `cFS_DockingSim/Assets/RelativeNav.cs` | **Truth** range, closing speed, lateral offset, attitude errors — HUD, `DockingDetector` and truth log only; flight software never sees it | Changing what the HUD shows or the capture check |
 | `cFS_DockingSim/Assets/RCSModel.cs` | Thruster valve hardware: `SetThrusterOnTimes()` opens each valve for its cFS on-time at full thrust; "Log cFS thruster table" context menu regenerates `rcs_thr_tbl.c` | Changing thruster layout or thrust |
 | `cFS_DockingSim/Assets/HandController.cs` | Crew hand controllers (keyboard) → `Thc`/`Rhc` in every SIM_STATE; GNC flies them in MANUAL | Changing manual-flight inputs |
 | `cFS_DockingSim/Assets/VehicleState.cs` | Rigidbody wrapper — mass set directly on Rigidbody; inertia auto-computed from mass + shape | Changing vehicle physical properties |
@@ -54,7 +57,7 @@ ClohessyWiltshire.cs → orbital drift         rcs_tbl.h    → thruster geometr
 | `cFS_DockingSim/Assets/DockingDetector.cs` | Latches `isDocked` when 4 thresholds met; fires `onDock` event | Changing docking contact thresholds |
 | `cFS_DockingSim/Assets/RateDamping.cs` | Proportional rate-null controller (H key toggle); suppressed when cFS has authority | Changing attitude hold behavior |
 | `cFS_DockingSim/Assets/ThrusterDiagnostic.cs` | F8 hardware bench test: fires thruster groups and single thrusters, logs measured vs geometry-predicted ΔV/Δω | Suspected dead/mis-canted thruster |
-| `cFS_DockingSim/Assets/UdpTelemetrySender.cs` | Lock-step master: sends `SIM_STATE` each GNC cycle, waits for the answer | Adding telemetry fields, cycle rate |
+| `cFS_DockingSim/Assets/UdpTelemetrySender.cs` | Lock-step master: samples `ChaserSensors` + hand controllers into `SIM_STATE` each GNC cycle, waits for the answer | Cycle rate, lock-step behaviour |
 | `cFS_DockingSim/Assets/UdpCommandReceiver.cs` | Validates `THRUSTER_CMD` frames; applies them via `RCSModel.SetThrusterOnTimes()` | Changing command format or timeout |
 
 ---
@@ -123,7 +126,7 @@ Defined in `gnc_app.h` as `GNC_Phase_t`. Transitions are computed in `GNC_APP_Se
 
 ## Control Law
 
-Implemented in `GNC_APP_ComputeControl()` in `gnc_app.c`, which runs once per SIM_STATE (every 0.2 s of sim time). It returns the **impulse** GNC wants imparted this cycle, `{Px, Py, Pz, Lx, Ly, Lz}` in the body frame, not thrusters or durations:
+Implemented in `GNC_APP_ComputeControl()` in `gnc_app.c`, which runs once per NAV_SOLUTION (one per SIM_STATE, every 0.2 s of sim time). It returns the **impulse** GNC wants imparted this cycle, `{Px, Py, Pz, Lx, Ly, Lz}` in the body frame, not thrusters or durations:
 
 ```
 P = VehicleMass × Δv          (N·s)
@@ -186,12 +189,12 @@ Any stick deflection over 0.5 enters MANUAL from any undocked phase, including I
 
 ---
 
-## UDP Interface (SimLink v3)
+## UDP Interface (SimLink v4)
 
 The byte-level layouts, framing, CRC and lock-step protocol are defined in **[SIMLINK_ICD.md](SIMLINK_ICD.md)**. Short version:
 
-- Unity sends a 132-byte `SIM_STATE` frame (nav state + crew hand controllers) to port 5005 once per GNC cycle (0.2 s of sim time), then holds that physics step.
-- cFS `sim_io` validates the frame and publishes it on the Software Bus. `gnc_app` runs one cycle and publishes an impulse request; `rcs` allocates it and publishes `THRUSTER_CMD` (valve on-times); `sim_io` frames that back to Unity on port 5006 with the same Seq.
+- Unity sends a 116-byte `SIM_STATE` frame (raw sensor readings + crew hand controllers + capture switch) to port 5005 once per GNC cycle (0.2 s of sim time), then holds that physics step.
+- cFS `sim_io` validates the frame and publishes it on the Software Bus. `nav` publishes a navigation solution; `gnc_app` runs one cycle on it and publishes an impulse request; `rcs` allocates it and publishes `THRUSTER_CMD` (valve on-times); `sim_io` frames that back to Unity on port 5006 with the same Seq.
 - Unity applies the command in the same physics step and continues. With no answer within 500 ms it drops to free-running, and it re-engages automatically.
 - If no command arrives for 3 s, `UdpCommandReceiver` clears cFS authority and zeros the thrusters.
 
@@ -216,8 +219,11 @@ The byte-level layouts, framing, CRC and lock-step protocol are defined in **[SI
 | `AxialBrakeAccel_mss` | 0.189 | m/s² | Planning estimate for the hold-point braking lookahead only |
 | `ManualAccel_mss` / `ManualRate_rads` / `ManualRateDeadband_rads` | 0.02 / 0.0175 / 0.0008 | m/s², rad/s | Crew hand-controller authority |
 | `EntrySettleCycles` | 15 | cycles | CORRECT → APPROACH settle gate (integer since phase 3) |
+| `LatVelAtPort` | 1 | 0/1 | Lateral channel velocity: 1 = docking-port point velocity (v_cm + ω×r), 0 = CoM velocity (pre-phase-4) |
 
 Fault thresholds (sim link loss after 2 s, 3-cycle axial under-delivery) are not GNC parameters. They are LC watchpoints; see [Fault Protection](#fault-protection-fdir-lc--sc).
+
+**NAV** lives in `NAV_CfgTbl_t` (`nav_tbl.h`, defaults in `nav_cfg_tbl.c` → `/cf/nav_cfg_tbl.tbl`, managed on the 1 Hz HK tick): chaser port / LIDAR mounting, ISS port pose and docking roll index, the sensor noise model, and filter tuning (process noise, 6-sigma innovation gate, 10-reject re-initialisation, the sigma limits for "relative nav VALID").
 
 **RCS** lives in `RCS_ThrTbl_t` (`rcs_tbl.h`, defaults in `rcs_thr_tbl.c` → `/cf/rcs_thr_tbl.tbl`, managed on the 1 Hz HK tick). It holds `Thrust_N` (400), `MinOnTime_s` (0.020), `MaxOnTime_s` (0.190), and per-thruster `Pos_m`/`Dir`/`Enabled` (T00–T03 disabled).
 
@@ -225,25 +231,25 @@ Fault thresholds (sim link loss after 2 s, 3-cycle axial under-delivery) are not
 
 ## Navigation State Available to the GNC
 
-`RelativeNav.cs` computes these each `FixedUpdate` and packs them into the telemetry packet:
+Flight software navigates for itself (realism phase 4). Unity's `ChaserSensors` sends raw readings; the cFS `nav` app estimates the state each cycle and publishes `NAV_SOLUTION` (`nav_msg.h`):
 
-| Property | How computed | Available in telemetry as |
-|----------|-------------|--------------------------|
-| `range` | `(chaserPort.position - targetPort.position).magnitude` | `Range_m` |
-| `closingSpeed` | `−dot(relativeVelocity, approachAxis)` | `ClosingSpeed_ms` |
-| `lateralOffset` | perpendicular distance from docking axis | `LateralOffset_m` |
-| `attitudeError` | `Quaternion.Angle` between port forward vectors | `AttitudeError_deg` |
-| `pitchError` / `yawError` / `rollError` | per-axis decomposition of the port-to-port error quaternion | `PitchError_deg` / `YawError_deg` / `RollError_deg` |
+| Group | Source | Fields |
+|-------|--------|--------|
+| Attitude | star tracker (gyro-propagated for up to 10 s if it drops out) | `AttQuat_L`, `AttErr_B` (rotation vector to the docking attitude, from the table's `DockedQuat_TP`) |
+| Rates | gyro | `AngRate_B` |
+| Translation | 6-state Kalman filter in LVLH: CW dynamics + IMU Δv, LIDAR position fixes | `CmPos_L`, `CmVel_L` (chaser CoM − ISS reference) |
+| Docking port | filter + attitude + table geometry, docking frame D | `PortPos_D`, `PortVel_D` (v_cm + ω×r), `Range_m`, `ClosingSpeed_ms`, `LateralOffset_m` |
+| Health | covariance and gates | `Status` (`NAV_STATUS_*`), `PosSigma_m`, `VelSigma_ms` |
 
-Full 6-DOF state (position, velocity, angular velocity) is also in the packet. cFS currently uses:
-- `LatOffset_X`, `LatOffset_Y` (port-relative) for lateral position control
-- `RelPos`, `RelVel` (target-relative) for the CW feed-forward and lateral velocity error
-- `AngVel_X/Y/Z` for the attitude D-term
-- `ClosingSpeed_ms` (rate along the docking axis) for axial closure control
-- `Thc`, `Rhc` (crew hand controllers) for MANUAL flight
-- `PitchError_deg`/`YawError_deg`/`RollError_deg` for the attitude P-term
+GNC builds its per-cycle input (`GNC_APP_Input_t`) from that, plus the hand controllers and capture switch straight from `SIM_STATE`. It uses:
+- `PortPos_D` X/Y (`LatOffset_X/Y`) for lateral position control, and `PortVel_D` X/Y (or `CmVel_L`, per `LatVelAtPort`) for the lateral velocity error
+- `CmPos_L` / `CmVel_L` for the CW feed-forward
+- `ClosingSpeed_ms` for axial closure, `Range_m` / `LateralOffset_m` for phase gates and the hold-point lookahead
+- `AttErr_B` (as pitch/yaw/roll degrees) and `AngRate_B` for the attitude P and D terms
+- `DeltaV_B` (IMU) for the actuator-health check
+- `NAV_STATUS_RELNAV_VALID`: while it is clear, translation coasts and phase gates hold; attitude control continues on the star tracker and gyro
 
-`Range_m` and `LateralOffset_m` are used for phase gate logic and hold-point lookahead, not directly in the axial/lateral control law.
+The truth equivalents (`RelativeNav.cs`) still drive the Unity HUD and the capture check, so the HUD and the ground console can disagree by the navigation error.
 
 ---
 
@@ -314,12 +320,12 @@ Edit `AxialKp`, `MaxCloseSpeed` (outer cap), and/or `MaxCloseSpeed_Inner` (inner
 3. Add a new EVS event ID and string
 4. Add the command to `gnc_cmd.py` (Python CCSDS sender)
 
-### Add a new telemetry field to the nav packet
+### Add a sensor reading to SIM_STATE
 
 1. Add the field to `SIMLINK_SimState_t` in `sim_io/fsw/inc/simlink_icd.h` and update its size `_Static_assert`
-2. Mirror it in `SimLinkProtocol.SimState` + `BuildSimStateFrame()` (same order), set it in `UdpTelemetrySender.BuildState()`
-3. Update `SimStateBytes` in `SimLinkProtocol.cs` and the table in `Docs/SIMLINK_ICD.md` — SIM_IO rejects any frame whose size or CRC does not match
-4. Update `TelemetryLogger.cs` CSV columns if you want it logged
+2. Mirror it in `SimLinkProtocol.SimState` + `BuildSimStateFrame()` (same order), and produce it in `ChaserSensors.Sample()`
+3. Update `SimStateBytes` in `SimLinkProtocol.cs`, the `STATE` format in `tools/simlink_smoke.py` and the table in `Docs/SIMLINK_ICD.md` — SIM_IO rejects any frame whose size or CRC does not match
+4. Use it in `nav_filter.c` (`NAV_Step`); run the harness in `apps/nav/unit-test/` after changing the estimator
 
 ### Enable / retune autonomous hold waypoints
 
@@ -337,7 +343,7 @@ With cFS stopped, press **F8** in Unity to run `ThrusterDiagnostic.cs`. It fires
 
 ## Scenario Reset (Unity)
 
-Press **Backspace** to reset the scenario. `ScenarioReset.cs` returns the chaser to its initial position/rotation and zeroes all velocities. The cFS GNC phase is not reset — send `python3 gnc_cmd.py abort` then `go` if you want to restart from IDLE (this also re-arms both autonomous hold points). If an FDIR response fired during the run, also send `python3 gnc_cmd.py rearm`.
+Press **Backspace** to reset the scenario. `ScenarioReset.cs` returns the chaser to its initial position/rotation and zeroes all velocities (and tells `ChaserSensors` not to report the teleport as an acceleration). NAV notices the jump: its LIDAR fixes fail the innovation gate for 2 s, then it re-initialises (event NAV 10) — or send `python3 gnc_cmd.py nav-reset` to do it at once. The cFS GNC phase is not reset — send `python3 gnc_cmd.py abort` then `go` if you want to restart from IDLE (this also re-arms both autonomous hold points). If an FDIR response fired during the run, also send `python3 gnc_cmd.py rearm`.
 
 ---
 
@@ -380,9 +386,10 @@ Sent to CI_LAB on port 1234. Every command is acknowledged by an EVS event in th
 | 23 | TBL_VAL_ERR | Parameter table image rejected by the validator |
 | 24 | BAD_CTRL | Non-finite control output, coasting |
 | 25, 26 | — | Retired in phase 3: link-loss abort and actuator anomaly are now LC events 1000 / 1001 |
-| 27 | BAD_DT | SIM_STATE cycle length out of range |
+| 27 | BAD_DT | NAV_SOLUTION cycle length out of range |
 | 28 | LINK_INF | Sim link restored after ≥ 2 s of silence (informational) |
 | 29 | MANUAL_INF | Crew hand-controller takeover |
+| 30 | NAV_INF | NAV relative solution became unusable (translation coasts) or usable again |
 
 ---
 

@@ -5,7 +5,8 @@ using UnityEngine;
 
 /// <summary>
 /// SimLink lock-step master. Every GNC cycle (gncCycleSec of simulation time) it sends a
-/// SIM_STATE frame to cFS SIM_IO, then blocks this physics step until the THRUSTER_CMD
+/// SIM_STATE frame — the raw sensor readings from ChaserSensors plus the crew hand
+/// controllers — to cFS SIM_IO, then blocks this physics step until the THRUSTER_CMD
 /// answering that frame comes back and is applied — so flight software runs on
 /// simulation time and every run with the same inputs is repeatable.
 ///
@@ -13,17 +14,18 @@ using UnityEngine;
 /// keeps going, cFS commands are applied whenever they arrive) and re-engages automatically
 /// once cFS answers the previous cycle again. Frame format: SimLinkProtocol / Docs/SIMLINK_ICD.md.
 ///
-/// Execution order: runs after RelativeNav / ApproachCorridor / DockingDetector (so the
-/// state it sends is this step's) and before RCSModel (so a command applied here fires in
-/// this same step).
+/// Execution order: runs after ChaserSensors (so the Δv it samples includes the last physics
+/// step) and before RCSModel (so a command applied here fires in this same step).
 /// </summary>
 [DefaultExecutionOrder(-100)]
 public class UdpTelemetrySender : MonoBehaviour
 {
+    [Tooltip("Truth navigation — used only to find the docking ports for the sensors.")]
     public RelativeNav      nav;
     public VehicleState     chaser;
-    public ApproachCorridor corridor;
     public DockingDetector  detector;
+    [Tooltip("Navigation sensors (IMU, star tracker, LIDAR). Found or added automatically if left empty.")]
+    public ChaserSensors    sensors;
     [Tooltip("Command side of the link. Found automatically if left empty.")]
     public UdpCommandReceiver commandReceiver;
     [Tooltip("Crew hand controllers (keyboard). Found or added automatically if left empty.")]
@@ -59,6 +61,7 @@ public class UdpTelemetrySender : MonoBehaviour
             commandReceiver = FindAnyObjectByType<UdpCommandReceiver>();
         if (handController == null)
             handController = FindAnyObjectByType<HandController>() ?? gameObject.AddComponent<HandController>();
+        WireSensors();
 
         try
         {
@@ -79,6 +82,21 @@ public class UdpTelemetrySender : MonoBehaviour
 
     int StepsPerCycle => Mathf.Max(1, Mathf.RoundToInt(gncCycleSec / Time.fixedDeltaTime));
 
+    void WireSensors()
+    {
+        if (sensors == null)
+            sensors = FindAnyObjectByType<ChaserSensors>() ?? gameObject.AddComponent<ChaserSensors>();
+        if (sensors.chaser      == null) sensors.chaser      = chaser;
+        if (sensors.detector    == null) sensors.detector    = detector;
+        if (sensors.relativeNav == null) sensors.relativeNav = nav;
+        if (sensors.gravity     == null) sensors.gravity     = FindAnyObjectByType<ClohessyWiltshire>();
+        if (nav != null)
+        {
+            if (sensors.chaserPort == null) sensors.chaserPort = nav.chaserPort;
+            if (sensors.targetPort == null) sensors.targetPort = nav.targetPort;
+        }
+    }
+
     void FixedUpdate()
     {
         if (stepInCycle == 0)
@@ -90,7 +108,7 @@ public class UdpTelemetrySender : MonoBehaviour
 
     void RunCycleBoundary()
     {
-        if (nav == null || chaser == null) return;
+        if (chaser == null || sensors == null) return;
 
         if (handController != null) handController.Sample();
 
@@ -128,39 +146,15 @@ public class UdpTelemetrySender : MonoBehaviour
 
     SimLinkProtocol.SimState BuildState()
     {
-        VehicleState target = nav.target;
-        Vector3 relPos = target != null ? chaser.position - target.position : chaser.position;
-        Vector3 relVel = target != null ? chaser.velocity - target.velocity : chaser.velocity;
-
-        // World-frame angular velocity → chaserPort frame, matching the body-frame sign
-        // convention of pitchError/yawError/rollError.
-        Vector3 angVel = nav.chaserPort != null
-            ? nav.chaserPort.InverseTransformDirection(chaser.angularVelocity)
-            : chaser.angularVelocity;
-
-        uint flags = 0;
-        if (corridor != null && corridor.inCorridor) flags |= SimLinkProtocol.FlagInCorridor;
-        if (detector != null && detector.isDocked)   flags |= SimLinkProtocol.FlagDocked;
-
-        return new SimLinkProtocol.SimState
+        float cycleDt = StepsPerCycle * Time.fixedDeltaTime;
+        var   state   = new SimLinkProtocol.SimState
         {
-            CycleDt_s         = StepsPerCycle * Time.fixedDeltaTime,
-            Range_m           = nav.range,
-            ClosingSpeed_ms   = nav.closingSpeed,
-            LateralOffset_m   = nav.lateralOffset,
-            AttitudeError_deg = nav.attitudeError,
-            RelPos            = relPos,
-            RelVel            = relVel,
-            AngVel            = angVel,
-            Flags             = flags,
-            PitchError_deg    = nav.pitchError,
-            YawError_deg      = nav.yawError,
-            RollError_deg     = nav.rollError,
-            LatOffset_X       = nav.lateralOffsetX,
-            LatOffset_Y       = nav.lateralOffsetY,
-            Thc               = handController != null ? handController.Translation : Vector3.zero,
-            Rhc               = handController != null ? handController.Rotation    : Vector3.zero,
+            CycleDt_s = cycleDt,
+            Thc       = handController != null ? handController.Translation : Vector3.zero,
+            Rhc       = handController != null ? handController.Rotation    : Vector3.zero,
         };
+        sensors.Sample(ref state, cycleDt);
+        return state;
     }
 
     void OnDestroy()

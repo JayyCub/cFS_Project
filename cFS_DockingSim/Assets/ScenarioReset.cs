@@ -44,6 +44,10 @@ public class ScenarioReset : MonoBehaviour
 
         detector?.Reset();
 
+        // The teleport and velocity zeroing are not an acceleration the IMU should report
+        var sensors = FindAnyObjectByType<ChaserSensors>();
+        if (sensors != null) sensors.ResetSensors();
+
         Debug.Log("[RESET] Chaser returned to initial conditions.");
     }
 }

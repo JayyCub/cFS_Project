@@ -1,8 +1,11 @@
 using UnityEngine;
 
 /// <summary>
-/// Computes approach navigation state between two docking ports each physics step.
-/// All other Phase 2+ components (DockingDetector, DockingHUD, cFS telemetry) read from here.
+/// TRUTH relative state between the two docking ports, computed from the transforms each
+/// physics step. Used by the simulation side only: the HUD, the docking mechanism
+/// (DockingDetector) and the truth log. Since realism phase 4 none of it goes to flight
+/// software — cFS gets raw sensor readings from ChaserSensors and its NAV app estimates its
+/// own version of these numbers, so the HUD (truth) and the ground console (NAV) can differ.
 /// </summary>
 [DefaultExecutionOrder(-200)] // before ApproachCorridor, DockingDetector, UdpTelemetrySender read it
 public class RelativeNav : MonoBehaviour

@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 
 /// <summary>
-/// SimLink v3 — wire format between this simulation (the vehicle "hardware") and
+/// SimLink v4 — wire format between this simulation (the vehicle "hardware") and
 /// cFS's SIM_IO app. Mirrors cFS/apps/sim_io/fsw/inc/simlink_icd.h; see
 /// Docs/SIMLINK_ICD.md.
 ///
@@ -16,11 +16,15 @@ using UnityEngine;
 ///
 /// v3: cFS does thruster allocation + PWM, so the command is per-thruster valve
 /// on-times; SIM_STATE carries the crew hand-controller deflections.
+///
+/// v4: SIM_STATE carries raw sensor readings (ChaserSensors: IMU, star tracker,
+/// relative-pose LIDAR, capture switches) instead of truth-derived navigation;
+/// the cFS NAV app does the navigation.
 /// </summary>
 public static class SimLinkProtocol
 {
     public const uint   Sync    = 0x324B4C53; // 'S','L','K','2' on the wire
-    public const ushort Version = 3;
+    public const ushort Version = 4;
 
     public const ushort TypeSimState    = 1; // Unity -> cFS
     public const ushort TypeThrusterCmd = 3; // cFS -> Unity (type 2 = v2 WRENCH_CMD, retired)
@@ -29,28 +33,37 @@ public static class SimLinkProtocol
 
     public const int HeaderBytes      = 24;
     public const int TrailerBytes     = 4;
-    public const int SimStateBytes    = 104;
+    public const int SimStateBytes    = 88;
     public const int ThrusterCmdBytes = 8 + 4 * NumThrusters; // 72
 
-    public const int SimStateFrameBytes    = HeaderBytes + SimStateBytes + TrailerBytes;    // 132
+    public const int SimStateFrameBytes    = HeaderBytes + SimStateBytes + TrailerBytes;    // 116
     public const int ThrusterCmdFrameBytes = HeaderBytes + ThrusterCmdBytes + TrailerBytes; // 100
 
-    public const uint FlagInCorridor = 0x1;
-    public const uint FlagDocked     = 0x2;
+    // SensorValid bits: the device produced a reading this cycle
+    public const uint SensorImu = 0x1; // GyroRate_B + DeltaV_B
+    public const uint SensorSt  = 0x2; // StQuat
+    public const uint SensorRps = 0x4; // RpsRange/Az/El (target in field of view and range)
 
-    /// <summary>SIM_STATE payload — field order must match SIMLINK_SimState_t.</summary>
+    // MechFlags bits: docking-mechanism switches
+    public const uint MechCapture = 0x1; // soft-capture latches engaged
+
+    /// <summary>
+    /// SIM_STATE payload — raw sensor readings; field order must match SIMLINK_SimState_t.
+    /// Body frame = the chaser vehicle transform's axes (origin at the CoM); LVLH = world.
+    /// </summary>
     public struct SimState
     {
-        public float   CycleDt_s;
-        public float   Range_m, ClosingSpeed_ms, LateralOffset_m, AttitudeError_deg;
-        public Vector3 RelPos;   // chaser - target origin, world (m)
-        public Vector3 RelVel;   // chaser - target velocity, world (m/s)
-        public Vector3 AngVel;   // chaser rate, chaser-port frame (rad/s)
-        public uint    Flags;
-        public float   PitchError_deg, YawError_deg, RollError_deg;
-        public float   LatOffset_X, LatOffset_Y;
-        public Vector3 Thc;      // crew translation hand controller, body X/Y/Z, -1..+1
-        public Vector3 Rhc;      // crew rotation hand controller (pitch/yaw/roll), -1..+1
+        public float      CycleDt_s;
+        public uint       SensorValid;  // Sensor* bits
+        public Vector3    GyroRate_B;   // body angular rate (rad/s)
+        public Vector3    DeltaV_B;     // non-gravitational Δv over the cycle just ended (m/s)
+        public Quaternion StQuat;       // star tracker: body attitude in LVLH (= transform.rotation)
+        public float      RpsRange_m;   // LIDAR line of sight to the target port, sensor frame:
+        public float      RpsAz_rad;    //   Az = atan2(x, z)
+        public float      RpsEl_rad;    //   El = asin(y / range)
+        public uint       MechFlags;    // Mech* bits
+        public Vector3    Thc;          // crew translation hand controller, body X/Y/Z, -1..+1
+        public Vector3    Rhc;          // crew rotation hand controller (pitch/yaw/roll), -1..+1
     }
 
     /// <summary>Decoded THRUSTER_CMD frame: valve on-times computed by the cFS RCS app.</summary>
@@ -68,19 +81,14 @@ public static class SimLinkProtocol
         int off = WriteHeader(buf, TypeSimState, seq, simTime);
 
         off = PutF(buf, off, s.CycleDt_s);
-        off = PutF(buf, off, s.Range_m);
-        off = PutF(buf, off, s.ClosingSpeed_ms);
-        off = PutF(buf, off, s.LateralOffset_m);
-        off = PutF(buf, off, s.AttitudeError_deg);
-        off = PutV(buf, off, s.RelPos);
-        off = PutV(buf, off, s.RelVel);
-        off = PutV(buf, off, s.AngVel);
-        off = PutU32(buf, off, s.Flags);
-        off = PutF(buf, off, s.PitchError_deg);
-        off = PutF(buf, off, s.YawError_deg);
-        off = PutF(buf, off, s.RollError_deg);
-        off = PutF(buf, off, s.LatOffset_X);
-        off = PutF(buf, off, s.LatOffset_Y);
+        off = PutU32(buf, off, s.SensorValid);
+        off = PutV(buf, off, s.GyroRate_B);
+        off = PutV(buf, off, s.DeltaV_B);
+        off = PutQ(buf, off, s.StQuat);
+        off = PutF(buf, off, s.RpsRange_m);
+        off = PutF(buf, off, s.RpsAz_rad);
+        off = PutF(buf, off, s.RpsEl_rad);
+        off = PutU32(buf, off, s.MechFlags);
         off = PutV(buf, off, s.Thc);
         off = PutV(buf, off, s.Rhc);
 
@@ -162,4 +170,5 @@ public static class SimLinkProtocol
     static int PutU32(byte[] b, int o, uint v)  { Buffer.BlockCopy(BitConverter.GetBytes(v), 0, b, o, 4); return o + 4; }
     static int PutU16(byte[] b, int o, ushort v){ Buffer.BlockCopy(BitConverter.GetBytes(v), 0, b, o, 2); return o + 2; }
     static int PutV(byte[] b, int o, Vector3 v) { o = PutF(b, o, v.x); o = PutF(b, o, v.y); return PutF(b, o, v.z); }
+    static int PutQ(byte[] b, int o, Quaternion q) { o = PutF(b, o, q.x); o = PutF(b, o, q.y); o = PutF(b, o, q.z); return PutF(b, o, q.w); }
 }

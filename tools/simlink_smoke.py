@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """
 SimLink smoke test — stands in for Unity to verify the cFS side end to end:
-SIM_IO (framing, lock-step) -> GNC (phases, control law) -> RCS (allocation, PWM) -> SIM_IO.
+SIM_IO (framing, lock-step) -> NAV (sensors -> navigation) -> GNC (phases, control law)
+-> RCS (allocation, PWM) -> SIM_IO.
 
 Sends SIM_STATE frames (Seq 1..N) exactly the way UdpTelemetrySender.cs does and checks
-each is answered by a CRC-valid THRUSTER_CMD echoing the same Seq. Scenario:
+each is answered by a CRC-valid THRUSTER_CMD echoing the same Seq. Since SimLink v4 the
+frames carry raw sensor readings, so a small truth model (class Truth) flies the chaser —
+docking port on the approach axis, upright, CW gravity — and produces consistent IMU,
+star tracker and LIDAR readings for NAV. It ignores the thruster commands: velocity only
+changes where the scenario says so (and the IMU reports exactly that Δv). Scenario:
 
-  1. IDLE (guidance inhibited at boot)       -> all valves closed
+  1. IDLE (guidance inhibited at boot)       -> all valves closed while NAV converges
   2. crew THC +Z (hand controller)           -> GNC MANUAL, approach group T04-T07 firing
   3. sticks released, still MANUAL           -> rate hold only (no translation)
-  4. ground GO, 0.2 m lateral offset         -> GNC CORRECT, lateral + braking pulses
+  4. ground GO, chaser drifting in 5 cm/s    -> GNC CORRECT, braking pulses
   5. ground ABORT                            -> IDLE, all valves closed
   6. corrupt frame                           -> dropped, not answered
 
@@ -25,22 +30,31 @@ Usage (cFS running, SIM_IO DestHost resolving to this machine, CI_LAB on --ci-po
 Wire format: Docs/SIMLINK_ICD.md (mirrors simlink_icd.h / SimLinkProtocol.cs).
 """
 import argparse
+import math
 import socket
 import struct
 import sys
 import time
 
 SYNC = 0x324B4C53
-VERSION = 3
+VERSION = 4
 TYPE_SIM_STATE = 1
 TYPE_THRUSTER_CMD = 3
 N_THR = 16
 
 HDR = struct.Struct("<IHHIId")                 # 24 B
-STATE = struct.Struct("<5f3f3f3fI3f2f3f3f")    # 104 B
+STATE = struct.Struct("<fI3f3f4f3fI3f3f")      # 88 B
 THR = struct.Struct(f"<Ii{N_THR}f")            # 72 B
 TRL = struct.Struct("<HH")                     # 4 B
-assert HDR.size == 24 and STATE.size == 104 and THR.size == 72
+assert HDR.size == 24 and STATE.size == 88 and THR.size == 72
+
+SENSOR_IMU, SENSOR_ST, SENSOR_RPS = 0x1, 0x2, 0x4
+CYCLE_DT = 0.2
+
+# Geometry, as in cFS nav_cfg_tbl.c: target port (= LIDAR reflector) relative to the ISS
+# reference point; the chaser docking port / LIDAR sit on body +Z ahead of the CoM.
+TARGET_PORT = (0.000005485832, -5.5613275, -16.092)
+MEAN_MOTION = 0.00113
 
 PHASES = {0: "IDLE", 1: "CORRECT", 2: "APPROACH", 3: "DOCKED", 4: "HOLD", 5: "MANUAL"}
 
@@ -61,17 +75,64 @@ def crc16(data: bytes) -> int:
     return crc
 
 
-def sim_state_frame(seq, sim_time, rng=30.0, lat=(0.0, 0.0), closing=0.0, thc=(0, 0, 0), rhc=(0, 0, 0)):
+class Truth:
+    """Chaser held upright on the approach axis. pos = chaser docking port minus target
+    port, world axes (z < 0 while short of the port). Velocity changes only through
+    set_vel(), which the IMU then reports as that cycle's Δv."""
+
+    def __init__(self, gap=40.0, lat=(0.0, 0.0)):
+        self.pos = [lat[0], lat[1], -gap]
+        self.vel = [0.0, 0.0, 0.0]
+        self.pending = None
+
+    def set_vel(self, vx=None, vy=None, vz=None):
+        v = list(self.vel)
+        for i, x in enumerate((vx, vy, vz)):
+            if x is not None:
+                v[i] = x
+        self.pending = v
+
+    def step(self):
+        """Advance one cycle; return the non-gravitational Δv (world = body: upright)."""
+        new = self.pending or list(self.vel)
+        self.pending = None
+        dv = [new[i] - self.vel[i] for i in range(3)]
+        # impulse at mid-interval (NAV's model): average old/new velocity over the cycle
+        v = [(self.vel[i] + new[i]) / 2 for i in range(3)]
+        n, sub = MEAN_MOTION, 10
+        h = CYCLE_DT / sub
+        for _ in range(sub):
+            # CW gravity, relative to the ISS reference (ClohessyWiltshire.cs); the
+            # along-track offset of the CoM from the port doesn't enter the equations
+            rx = TARGET_PORT[0] + self.pos[0]
+            ry = TARGET_PORT[1] + self.pos[1]
+            a = (-n * n * rx, 3 * n * n * ry - 2 * n * v[2], 2 * n * v[1])
+            for i in range(3):
+                v[i] += a[i] * h
+                new[i] += a[i] * h
+                self.pos[i] += v[i] * h
+        self.vel = new
+        return dv
+
+    def lidar(self):
+        """Range / az / el from the chaser port to the target port; sensor axes = world."""
+        p = [-x for x in self.pos]
+        rng = math.sqrt(sum(x * x for x in p))
+        return rng, math.atan2(p[0], p[2]), math.asin(p[1] / rng)
+
+
+def sim_state_frame(seq, sim_time, truth, thc=(0, 0, 0), rhc=(0, 0, 0)):
     length = HDR.size + STATE.size + TRL.size
+    dv = truth.step()
+    rng, az, el = truth.lidar()
     body = HDR.pack(SYNC, VERSION, TYPE_SIM_STATE, seq, length, sim_time) + STATE.pack(
-        0.2,                                   # CycleDt_s
-        rng, closing, (lat[0] ** 2 + lat[1] ** 2) ** 0.5, 0.0,
-        lat[0], lat[1], -rng,                  # RelPos
-        0.0, 0.0, closing,                     # RelVel
-        0.0, 0.0, 0.0,                         # AngVel
-        1,                                     # Flags: in corridor
-        0.0, 0.0, 0.0,                         # Pitch/Yaw/Roll error
-        lat[0], lat[1],                        # LatOffset X/Y
+        CYCLE_DT,
+        SENSOR_IMU | SENSOR_ST | SENSOR_RPS,
+        0.0, 0.0, 0.0,                         # gyro: not rotating
+        *dv,                                   # IMU Δv over the cycle
+        0.0, 0.0, 0.0, 1.0,                    # star tracker: upright (identity)
+        rng, az, el,                           # LIDAR
+        0,                                     # mechanism: not captured
         *thc, *rhc,
     )
     return body + TRL.pack(crc16(body), 0)
@@ -107,16 +168,17 @@ class Link:
         self.seq = 0
         self.rtts = []
         self.failures = 0
+        self.truth = Truth()
 
     def fail(self, msg):
         print("FAIL " + msg)
         self.failures += 1
 
-    def cycle(self, **state):
+    def cycle(self, **sticks):
         self.seq += 1
-        sim_time = (self.seq - 1) * 0.2
+        sim_time = (self.seq - 1) * CYCLE_DT
         t0 = time.perf_counter()
-        self.tx.sendto(sim_state_frame(self.seq, sim_time, **state), (self.a.host, self.a.port))
+        self.tx.sendto(sim_state_frame(self.seq, sim_time, self.truth, **sticks), (self.a.host, self.a.port))
         self.rx.settimeout(self.a.timeout)
         try:
             while True:
@@ -136,23 +198,23 @@ class Link:
             self.fail(f"Seq {self.seq}: answered Seq {cmd['seq']} simTime {cmd['sim_time']} n {cmd['n']}")
         return cmd
 
-    def ground(self, fc, mid=GNC_CMD_MID, payload=b"", **state):
+    def ground(self, fc, mid=GNC_CMD_MID, payload=b""):
         """Uplink a command, then keep the lock-step cycling for 1.2 s while CI_LAB
         (which polls its socket) delivers it — a silent gap that long would itself
         count toward the LC link-loss watchpoint."""
         self.tx.sendto(ccsds_cmd(mid, fc, payload), (self.a.host, self.a.ci_port))
-        return self.paced(6, **state)
+        return self.paced(6)
 
-    def paced(self, n, **state):
+    def paced(self, n):
         """n cycles at the real-time 5 Hz cadence (LC/SC run on wall-clock rate groups)."""
         c = None
         for _ in range(n):
-            c = self.cycle(**state) or c
+            c = self.cycle() or c
             time.sleep(0.2)
         return c
 
-    def rearm_fdir(self, **state):
-        return self.ground(SC_START_RTS, mid=SC_CMD_MID, payload=struct.pack("<HH", RTS_FDIR_REARM, 0), **state)
+    def rearm_fdir(self):
+        return self.ground(SC_START_RTS, mid=SC_CMD_MID, payload=struct.pack("<HH", RTS_FDIR_REARM, 0))
 
     def silent(self, sec):
         """Stop the sim (as a paused/crashed Unity would) and wait."""
@@ -179,11 +241,12 @@ def main():
     a = ap.parse_args()
     L = Link(a)
 
-    # 1. IDLE
-    for _ in range(5):
+    # 1. IDLE — long enough for NAV to initialise from the LIDAR and its velocity
+    #    uncertainty to converge (relative nav VALID), so GO in step 4 can steer
+    for _ in range(15):
         c = L.cycle()
     if c:
-        show("1 IDLE", c)
+        show("1 IDLE (NAV converging)", c)
         if c["phase"] != 0 or fired(c):
             L.fail("expected IDLE with all valves closed")
 
@@ -207,12 +270,13 @@ def main():
         if c["phase"] != 5 or fired(c):
             L.fail("expected MANUAL holding with valves closed (vehicle at rest)")
 
-    # 4. GO with a lateral offset and some closing speed -> autopilot corrects
+    # 4. GO while drifting in at 5 cm/s -> CORRECT station-keeps axially: braking pulses
+    L.truth.set_vel(vz=0.05)
     L.ground(GNC_GO)
     for _ in range(3):
-        c = L.cycle(lat=(0.2, -0.2), closing=0.05)
+        c = L.cycle()
     if c:
-        show("4 GO, lat (+0.2,-0.2), closing 0.05", c)
+        show("4 GO, drifting in at 0.05 m/s", c)
         if c["phase"] not in (1, 2):
             L.fail("expected CORRECT/APPROACH after GO")
         if not fired(c):
@@ -221,14 +285,14 @@ def main():
     # 5. ABORT -> IDLE, valves closed
     L.ground(GNC_ABORT)
     for _ in range(2):
-        c = L.cycle(lat=(0.2, -0.2), closing=0.05)
+        c = L.cycle()
     if c:
         show("5 ABORT", c)
         if c["phase"] != 0 or fired(c):
             L.fail("expected IDLE with all valves closed after ABORT")
 
     # 6. Corrupt frame must be dropped, not answered
-    bad = bytearray(sim_state_frame(L.seq + 1, L.seq * 0.2))
+    bad = bytearray(sim_state_frame(L.seq + 1, L.seq * CYCLE_DT, Truth()))
     bad[40] ^= 0xFF
     L.tx.sendto(bytes(bad), (a.host, a.port))
     L.rx.settimeout(0.5)
@@ -239,33 +303,34 @@ def main():
         print("  6 corrupt frame                     dropped (OK)")
 
     # 7. Link loss while guidance is active -> LC/SC abort
-    L.ground(GNC_GO, rng=40.0)
-    c = L.paced(3, rng=40.0)
+    L.truth.set_vel(vz=0.0)
+    L.ground(GNC_GO)
+    c = L.paced(3)
     if c and c["phase"] not in (1, 2):
         L.fail("expected guidance active after GO")
     L.silent(5.0)
-    c = L.cycle(rng=40.0)
+    c = L.cycle()
     if c:
         show("7 link loss 5 s (LC AP0 -> RTS 2)", c)
         if c["phase"] != 0 or fired(c):
             L.fail("expected IDLE (FDIR ABORT) with valves closed after link loss")
 
     # 8. Re-arm, fly, lose the link again -> aborts again only if AP 0 was re-armed
-    L.rearm_fdir(rng=40.0)
-    L.ground(GNC_GO, rng=40.0)
-    L.paced(3, rng=40.0)
+    L.rearm_fdir()
+    L.ground(GNC_GO)
+    L.paced(3)
     L.silent(5.0)
-    c = L.cycle(rng=40.0)
+    c = L.cycle()
     if c:
         show("8 re-armed, link loss again", c)
         if c["phase"] != 0:
             L.fail("expected a second FDIR ABORT — RTS 4 did not re-arm AP 0")
 
     # 9. Actuator anomaly on approach -> LC AP1 -> RTS 3 HOLD
-    L.rearm_fdir(rng=40.0)
-    L.ground(GNC_GO, rng=40.0)
+    L.rearm_fdir()
+    L.ground(GNC_GO)
     for _ in range(40):                         # settle gate: 15 steady cycles
-        c = L.cycle(rng=40.0)
+        c = L.cycle()
         if c and c["phase"] == 2:
             break
     if not c or c["phase"] != 2:
@@ -273,14 +338,14 @@ def main():
     else:
         show("9a APPROACH (burning to close)", c)
         held = False
-        for _ in range(20):                      # burns commanded, closing speed stays 0
-            c = L.cycle(rng=40.0)
+        for _ in range(20):                      # burns commanded, IMU measures no Δv
+            c = L.cycle()
             time.sleep(0.2)
             if c and c["phase"] == 4:
                 held = True
                 break
         if c:
-            show("9b frozen closing (LC AP1 -> RTS 3)", c)
+            show("9b no IMU dv (LC AP1 -> RTS 3)", c)
         if not held:
             L.fail("expected FDIR HOLD after axial burns stopped delivering")
 

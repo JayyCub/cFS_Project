@@ -22,7 +22,8 @@ using UnityEngine;
 /// The cross-track sign convention doesn't enter (that axis is decoupled), so the
 /// mapping above is valid despite Unity's left-handed axes.
 ///
-/// Must stay consistent with the CW feedforward in gnc_app.c (GNC_APP_ComputeControl).
+/// Must stay consistent with the CW feedforward in gnc_app.c (GNC_APP_ComputeControl) and the
+/// NAV filter's process model (nav_filter.c FilterPropagate).
 /// </summary>
 public class ClohessyWiltshire : MonoBehaviour
 {
@@ -34,8 +35,15 @@ public class ClohessyWiltshire : MonoBehaviour
     public VehicleState chaser;
     public VehicleState target;
 
+    /// <summary>
+    /// Gravitational (CW) acceleration applied to the chaser in the latest FixedUpdate, world
+    /// axes (m/s²). ChaserSensors subtracts it: an accelerometer in orbit can't feel gravity.
+    /// </summary>
+    public Vector3 LastAccel { get; private set; }
+
     void FixedUpdate()
     {
+        LastAccel = Vector3.zero;
         if (chaser == null || target == null) return;
 
         // Relative state, world axes
@@ -57,5 +65,6 @@ public class ClohessyWiltshire : MonoBehaviour
         // LVLH → world
         Vector3 aWorld = new Vector3(aCross, aRad, -aAlong);
         chaser.AddForce(aWorld * chaser.mass);
+        LastAccel = aWorld;
     }
 }

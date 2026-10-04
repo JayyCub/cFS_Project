@@ -146,6 +146,7 @@ python3 gnc_cmd.py <command>
 | `abort` | **Emergency stop.** Sends immediate coast to Unity. All thrust inhibited until you send `go`. |
 | `rearm` | Re-arm fault protection (SC RTS 4) after an automatic ABORT or HOLD. See [Fault Protection](#fault-protection). |
 | `trace-on` / `trace-off` | Show / hide the per-cycle `GNC #` line in the cFS console (EVS DEBUG events for GNC_APP). |
+| `nav-reset` | Drop NAV's translation filter; it re-initialises from the next LIDAR fix. NAV also does this by itself after 2 s of LIDAR fixes it disagrees with (for example after a scenario reset). |
 
 ### Typical Sequence
 
@@ -201,6 +202,11 @@ The cFS EVS log (printed to the terminal running `./core-cpu1`) is the primary d
 | `GNC_APP: HOLD POINT 1 — braking to ...` | 21 | Autonomous outer hold point (20 m default) reached during APPROACH. |
 | `GNC_APP: HOLD POINT 2 — braking to ...` | 22 | Autonomous inner hold point (3 m default) reached during APPROACH. |
 | `SIM_IO: rejected N-byte frame (bad ...)` | 6 | Unity and cFS disagree on the SimLink format — rebuild both from the same commit. |
+| `NAV: translation filter initialised from LIDAR at range X m` | NAV 9 | First LIDAR fix (or after `nav-reset`). Relative nav becomes VALID a few seconds later, once the velocity estimate has converged. |
+| `NAV: relative nav VALID / INVALID …` | NAV 11 | Whether GNC may steer on NAV's position and velocity. INVALID = translation coasts (attitude is still held). |
+| `NAV: filter disagreed with LIDAR … re-initialised` | NAV 10 | 10 LIDAR fixes in a row failed the innovation gate, so NAV trusted the sensor again. Expected once after a scenario reset (Backspace). |
+| `NAV: LIDAR tracking / lost the target port` | NAV 13 | Target port entered or left the LIDAR's field of view or range (0.3–250 m). Inside 0.3 m NAV dead-reckons on the IMU. |
+| `GNC_APP: NAV relative solution NOT usable — translation coasts` | 30 | GNC's side of NAV 11. Its `usable` partner follows when NAV recovers. |
 | `GNC_APP: CREW MANUAL TAKEOVER (hand controller)` | 29 | A hand-controller key was pressed; GNC is flying the sticks (MANUAL) until GO. |
 | `GNC_APP: sim link restored at Seq N after N s` | 28 | SIM_STATEs are flowing again after a gap. Guidance stays however FDIR left it. |
 | `SC 73: RTS Number 001 Started` … `LC 28: Set LC state command: new state = 1` | — | Boot: fault protection armed. If these are missing, FDIR is off. |
@@ -218,7 +224,7 @@ cFS watches for two faults on its own. The response is the same command you woul
 | Fault | Detected when | Automatic response |
 |-------|---------------|--------------------|
 | Sim link loss | No SIM_STATE for 2 s while not docked and not already aborted (fires about 4 s after Unity stops) | **ABORT** |
-| Axial thruster under-delivery | During APPROACH, 3 cycles in a row where axial burns change closing speed by less than half the prediction | **HOLD** |
+| Axial thruster under-delivery | During APPROACH, 3 cycles in a row where the accelerometer measures less than half the Δv the axial burns should have given | **HOLD** |
 
 After an automatic response, recover the way you would from your own ABORT or HOLD (fix the cause, then `go`), **and** send `python3 gnc_cmd.py rearm`. A response only fires once until it is re-armed. The ground console's FDIR panel shows each response as `ACTIVE` (armed) or `PASSIVE` (fired, needs re-arm). Pausing Unity for more than a few seconds while guidance is active counts as link loss by design. Expect an ABORT when you unpause.
 
@@ -226,14 +232,25 @@ How it works and how to change it: Docs/DEV_REFERENCE.md, *Fault Protection*.
 
 ---
 
+## Navigation
+
+Since realism phase 4, cFS does its own navigation. Unity sends raw sensor readings (gyro, accelerometer Δv, star tracker, LIDAR range and bearing to the target port, capture switch) and the cFS **NAV** app estimates where the docking port is. Two consequences for flying:
+
+- **After pressing Play, GNC needs a few seconds.** NAV initialises from the first LIDAR fix and reports relative nav VALID once its velocity estimate has converged (about 2–6 s, longer from far away). Until then the ground console's NAV panel reads `CONVERGING`, and a GO only holds attitude.
+- **The HUD and the ground console can differ slightly.** The Unity HUD shows truth. The ground console shows what flight software believes: millimetres apart up close, a centimetre or two at 40 m.
+
+The ground console's NAV panel shows whether relative nav is valid, the position and velocity uncertainty (σ), how many LIDAR fixes were used or rejected, and how far off the last one was (innovation, in σ). Values under about 3 σ are normal. To test degraded modes, tick the *Fault injection* boxes on the `ChaserSensors` component (added to the UdpTelemetrySender object at runtime) in Play mode.
+
+---
+
 ## Flight Data
 
 - **Ground console** (`python3 ground_console.py`, http://localhost:8080) writes every per-cycle STATE packet to `run_logs/gnc_state_<time>.csv`.
-- **Onboard recorder (DS)** writes `cf/fdr_gnc<seq>.dat` (STATE, valve commands, GNC/RCS/SIM_IO/LC/SC HK) and `cf/fdr_evs<seq>.dat` (all events) next to `core-cpu1`. Each run overwrites the previous one, so copy the files off first to keep them. Decode them with:
+- **Onboard recorder (DS)** writes `cf/fdr_gnc<seq>.dat` (STATE, NAV solution, valve commands, GNC/NAV/RCS/SIM_IO/LC/SC HK) and `cf/fdr_evs<seq>.dat` (all events) next to `core-cpu1`. Each run overwrites the previous one, so copy the files off first to keep them. Decode them with:
 
 ```bash
 python3 tools/fdr_decode.py build-native_std/exe/cpu1/cf/fdr_gnc00000001.dat
-# -> .gnc_state.csv, .thruster_cmd.csv, .gnc_hk.csv  (fdr_evs -> .events.txt)
+# -> .gnc_state.csv, .nav_solution.csv, .thruster_cmd.csv, .gnc_hk.csv, .nav_hk.csv  (fdr_evs -> .events.txt)
 ```
 
 ---

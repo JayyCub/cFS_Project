@@ -41,6 +41,7 @@ RTS_FDIR_REARM = 4          # sample_defs/cpu1/tables/sc_rts004.c
 GNC_HK_MID = 0x0893
 GNC_STATE_MID = 0x0895
 LC_HK_MID = 0x08A7
+NAV_HK_MID = 0x08D0
 EVS_LONG_MID = 0x0808
 
 # ---------------------------------------------------------------------------
@@ -75,6 +76,22 @@ GNC_FLAGS = {
     0x10: "CONTACT",
     0x20: "BAD_CTRL",
     0x40: "LINK_UP",
+    0x80: "NAV_INVALID",
+}
+
+# NAV_HkTlm_t (nav_msg.h): CmdCount CmdErrCount CycleCount RpsAccepted RpsRejected
+# RpsUnavailable FilterInits SensorRejects Status LastInnovSigma PosSigma_m VelSigma_ms
+NAV_HK = struct.Struct("<9I3f")
+assert TLM_HDR_LEN + NAV_HK.size == 64
+NAV_STATUS = {  # nav_status.h
+    0x01: "ATT",
+    0x02: "RATE",
+    0x04: "RELNAV",
+    0x08: "FILTER",
+    0x10: "LIDAR_USED",
+    0x20: "LIDAR_REJ",
+    0x40: "DV",
+    0x80: "ST",
 }
 
 # LC_HkTlm_t: CmdCount CmdErrCount CurrentLCState Pad8, WPResults[44], APResults[88]
@@ -126,6 +143,7 @@ _gnc_state = {
     "streak": 0,
     "lc_state": "---",
     "fdir": [],
+    "nav_status": [],
     "last_rx": None,
 }
 
@@ -240,6 +258,25 @@ def _decode_lc_hk(data: bytes):
             "result": LC_AP_RESULTS[(byte >> shift) & 0x3],
         })
     return {"lc_state": LC_STATES.get(data[LC_OFF_STATE], "?"), "fdir": fdir}
+
+
+def _decode_nav_hk(data: bytes):
+    if len(data) < TLM_HDR_LEN + NAV_HK.size:
+        return None
+    (_, _, _, rps_ok, rps_rej, rps_none, inits, sens_rej, status,
+     innov, pos_sig, vel_sig) = NAV_HK.unpack_from(data, TLM_HDR_LEN)
+    return {
+        "nav_status": [name for bit, name in NAV_STATUS.items() if status & bit],
+        "nav_relnav": bool(status & 0x04),
+        "nav_filter": bool(status & 0x08),
+        "nav_att": bool(status & 0x01),
+        "nav_st": bool(status & 0x80),
+        "nav_rps": [rps_ok, rps_rej, rps_none],
+        "nav_inits": inits,
+        "nav_sensor_rej": sens_rej,
+        "nav_innov": innov,
+        "nav_sigma": [pos_sig, vel_sig],
+    }
 
 
 class StateRecorder:
@@ -386,6 +423,15 @@ def udp_recv_thread():
 
         elif mid == LC_HK_MID:
             decoded = _decode_lc_hk(data)
+
+            if decoded:
+                with _gnc_lock:
+                    _gnc_state.update(decoded)
+
+                _broadcast("gnc", decoded)
+
+        elif mid == NAV_HK_MID:
+            decoded = _decode_nav_hk(data)
 
             if decoded:
                 with _gnc_lock:

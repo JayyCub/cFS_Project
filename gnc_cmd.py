@@ -12,6 +12,7 @@ Usage:
     python3 gnc_cmd.py rearm       # SC RTS 4: re-arm the LC FDIR actionpoints
     python3 gnc_cmd.py trace-on    # show the per-cycle "GNC #" line in the cFS console
     python3 gnc_cmd.py trace-off
+    python3 gnc_cmd.py nav-reset   # NAV: drop the filter, re-initialise on the next LIDAR fix
 
 CI_LAB listens on 127.0.0.1:1234 by default (cpu1, no port offset).
 
@@ -30,6 +31,7 @@ import struct
 import sys
 
 GNC_APP_CMD_MID = 0x1893   # gnc_app_msgids.h
+NAV_CMD_MID = 0x18D0       # nav_msgids.h
 SC_CMD_MID = 0x18A9        # SC command MID (topic 0xA9)
 CFE_EVS_CMD_MID = 0x1801   # cFE EVS command MID (topic 0x01)
 
@@ -58,6 +60,7 @@ COMMANDS = {
                   "EVS enable GNC_APP DEBUG events (per-cycle GNC # line)"),
     "trace-off": (CFE_EVS_CMD_MID, EVS_DISABLE_APP_EVENT_TYPE_CC, _evs_app_type("GNC_APP", EVS_DEBUG_BIT),
                   "EVS disable GNC_APP DEBUG events"),
+    "nav-reset": (NAV_CMD_MID, 2, b"", "NAV RESET_FILTER (re-initialise from the next LIDAR fix)"),
 }
 
 CI_LAB_HOST = "127.0.0.1"

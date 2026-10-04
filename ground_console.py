@@ -55,8 +55,8 @@ TLM_HDR_LEN = 16
 # GNC_APP_HkTlm_t: CmdCount CmdErrCount CycleCount SimStateCount Phase Flags Spare TlmStaleSec
 GNC_HK = struct.Struct("<IIIIBBHI")
 # GNC_APP_StateTlm_t: SimTime Seq Phase Flags UnderDeliveryStreak SettleCounter Spare + 23 floats
-GNC_STATE = struct.Struct("<dIBBHHH23f")
-assert TLM_HDR_LEN + GNC_HK.size == 40 and TLM_HDR_LEN + GNC_STATE.size == 128
+GNC_STATE = struct.Struct("<dIBBHHH23fHH3f")
+assert TLM_HDR_LEN + GNC_HK.size == 40 and TLM_HDR_LEN + GNC_STATE.size == 144
 
 GNC_STATE_FIELDS = (
     ["sim_time", "seq", "phase", "flags", "under_delivery_streak", "settle_counter", "spare",
@@ -65,7 +65,8 @@ GNC_STATE_FIELDS = (
      "angvel_x", "angvel_y", "angvel_z",
      "relpos_x", "relpos_y", "relpos_z",
      "relvel_x", "relvel_y", "relvel_z",
-     "px_ns", "py_ns", "pz_ns", "lx_nms", "ly_nms", "lz_nms"]
+     "px_ns", "py_ns", "pz_ns", "lx_nms", "ly_nms", "lz_nms",
+     "overspeed_streak", "corridor_streak", "drift_safe_range_m", "cam_dv_ms", "spare2"]
 )
 
 GNC_FLAGS = {
@@ -104,7 +105,8 @@ LC_STATES = {1: "ACTIVE", 2: "PASSIVE", 3: "DISABLED"}
 LC_AP_STATES = {0: "UNUSED", 1: "ACTIVE", 2: "PASSIVE", 3: "DISABLED"}
 LC_AP_RESULTS = {0: "PASS", 1: "FAIL", 2: "ERROR", 3: "STALE"}
 FDIR_APS = {0: "Link loss -> ABORT", 1: "Axial anomaly -> HOLD",  # lc_def_adt.c
-            2: "NAV lost on approach -> ABORT", 3: "LIDAR rejects -> HOLD"}
+            2: "NAV lost on approach -> ABORT", 3: "LIDAR rejects -> HOLD",
+            4: "Approach overspeed -> HOLD", 5: "Out of corridor -> ABORT"}
 
 RUN_LOG_DIR = Path(__file__).parent / "run_logs"
 
@@ -123,6 +125,7 @@ PHASE_NAMES = {
     3: "DOCKED",
     4: "HOLD",
     5: "MANUAL",
+    6: "DEPART",
 }
 
 # ---------------------------------------------------------------------------
@@ -421,6 +424,10 @@ def udp_recv_thread():
                     "lateral_m": st["lateral_m"],
                     "att_err_deg": [st["pitch_err_deg"], st["yaw_err_deg"], st["roll_err_deg"]],
                     "streak": st["under_delivery_streak"],
+                    "overspeed": st["overspeed_streak"],
+                    "corridor": st["corridor_streak"],
+                    "drift_safe_m": st["drift_safe_range_m"],
+                    "cam_dv": st["cam_dv_ms"],
                     "sim_time": st["sim_time"],
                     "last_rx": time.strftime("%H:%M:%S"),
                 }

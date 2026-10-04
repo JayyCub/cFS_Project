@@ -37,9 +37,9 @@ NAV_HK_MID = 0x08D0
 NAV_SOLUTION_MID = 0x08D1
 EVS_LONG_MID = 0x0808
 
-PHASES = {0: "IDLE", 1: "CORRECT", 2: "APPROACH", 3: "DOCKED", 4: "HOLD", 5: "MANUAL"}
+PHASES = {0: "IDLE", 1: "CORRECT", 2: "APPROACH", 3: "DOCKED", 4: "HOLD", 5: "MANUAL", 6: "DEPART"}
 
-GNC_STATE = struct.Struct("<dIBBHHH23f")
+GNC_STATE = struct.Struct("<dIBBHHH23fHH3f")
 GNC_STATE_FIELDS = [
     "sim_time", "seq", "phase", "flags", "under_delivery_streak", "settle_counter", "spare",
     "range_m", "closing_ms", "lateral_m", "lat_x_m", "lat_y_m",
@@ -48,21 +48,22 @@ GNC_STATE_FIELDS = [
     "relpos_x", "relpos_y", "relpos_z",
     "relvel_x", "relvel_y", "relvel_z",
     "px_ns", "py_ns", "pz_ns", "lx_nms", "ly_nms", "lz_nms",
+    "overspeed_streak", "corridor_streak", "drift_safe_range_m", "cam_dv_ms", "spare2",
 ]
 
 GNC_HK = struct.Struct("<IIIIBBHI")
 GNC_HK_FIELDS = ["cmd_count", "cmd_err_count", "cycle_count", "sim_state_count", "phase", "flags", "spare",
                  "tlm_stale_sec"]
 
-NAV_SOLUTION = struct.Struct("<dIfIHH4f3f3f3f3f3f3f3f3f2f2f")
-assert NAV_SOLUTION.size == 152
+NAV_SOLUTION = struct.Struct("<dIfIHH4f3f3f3f3f3f3f3f3f2ff4ff")
+assert NAV_SOLUTION.size == 168
 NAV_SOLUTION_FIELDS = (
     ["sim_time", "seq", "cycle_dt", "status", "consec_rps_rejects", "spare", "q_x", "q_y", "q_z", "q_w",
      "rate_x", "rate_y", "rate_z", "atterr_x_rad", "atterr_y_rad", "atterr_z_rad",
      "cm_pos_x", "cm_pos_y", "cm_pos_z", "cm_vel_x", "cm_vel_y", "cm_vel_z",
      "port_pos_x", "port_pos_y", "port_pos_z", "port_vel_x", "port_vel_y", "port_vel_z",
      "range_m", "closing_ms", "lateral_m", "dv_x", "dv_y", "dv_z", "pos_sigma_m", "vel_sigma_ms",
-     "att_sigma_rad", "spare2"]
+     "att_sigma_rad", "dock_q_x", "dock_q_y", "dock_q_z", "dock_q_w", "spare2"]
 )
 
 NAV_HK = struct.Struct("<9I4f3f3fI")

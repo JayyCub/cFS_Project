@@ -143,7 +143,7 @@ python3 gnc_cmd.py <command>
 | `reset` | Zeros HK counters (CmdCount, CmdErrCount, SimStateCount). |
 | `hold` | Immediately freeze at current range. GNC station-keeps — no axial closure. |
 | `go` | Release a `hold` or the startup pre-latch. Resumes guidance. |
-| `abort` | **Emergency stop.** Sends immediate coast to Unity. All thrust inhibited until you send `go`. |
+| `abort` | **Collision-avoidance manoeuvre.** GNC enters DEPART: it backs away along the docking axis (at least 0.1 m/s, more if needed so the free drift stays clear of the station), then coasts in IDLE. `go` is refused until the manoeuvre finishes; after that, nothing fires until you send `go`. |
 | `rearm` | Re-arm fault protection (SC RTS 4) after an automatic ABORT or HOLD. See [Fault Protection](#fault-protection). |
 | `trace-on` / `trace-off` | Show / hide the per-cycle `GNC #` line in the cFS console (EVS DEBUG events for GNC_APP). |
 | `nav-reset` | Drop NAV's translation filter; it re-initialises from the next LIDAR fix. NAV also does this by itself after 2 s of LIDAR fixes it disagrees with (for example after a scenario reset). |
@@ -195,7 +195,8 @@ The cFS EVS log (printed to the terminal running `./core-cpu1`) is the primary d
 | `GNC_APP: counters reset` | 13 | RESET_COUNTERS accepted. |
 | `GNC_APP: HOLD — station-keep at X m` | 14 | HOLD accepted. Range shown for reference. |
 | `GNC_APP: GO — guidance ENABLED` | 15 | GO accepted. |
-| `GNC_APP: *** ABORT ***` | 16 | ABORT accepted. Severity = CRITICAL. |
+| `GNC_APP: *** ABORT *** collision-avoidance manoeuvre …` | 16 | ABORT accepted: DEPART phase, retreating. Severity = CRITICAL. |
+| `GNC_APP: abort manoeuvre complete — X m/s …, free drift passively safe` | 31 | The retreat is done and the predicted free drift stays at least 10 m from the port for an orbit. GNC is now IDLE; send `go` to start over. |
 | `GNC_APP: cmd len err` | 17 | Command packet had wrong byte count. |
 | `GNC_APP: invalid command code` | 18 | Unknown function code received. |
 | `GNC_APP: parameter table updated` | 19 | An uplinked table image was activated — new gains are live. |
@@ -215,6 +216,8 @@ The cFS EVS log (printed to the terminal running `./core-cpu1`) is the primary d
 | `LC 1002: NAV lost on approach: ABORT …` | LC 1002 | NAV's relative solution was unusable for 2 s during APPROACH; RTS 2 (GNC ABORT). |
 | `LC 1003: LIDAR fixes rejected: HOLD …` | LC 1003 | 5 LIDAR fixes in a row failed NAV's gate during APPROACH; RTS 3 (GNC HOLD). |
 | `NAV: attitude filter initialised from the star tracker` | NAV 16 | First attitude fix. The gyro bias estimate settles over the first minute or two. |
+| `LC 1004: Approach overspeed: HOLD …` | LC 1004 | Closing faster than the approach envelope for 5 cycles; RTS 3 (GNC HOLD). |
+| `LC 1005: Out of corridor: ABORT …` | LC 1005 | Outside the approach cone for 5 cycles while inside 20 m; RTS 2 (GNC ABORT → retreat). |
 | `LC 60: AP failed while passive` | LC 60 | The fault is still present but the response already ran. Run `rearm` once recovered. |
 | `HS …: App Monitor Failure: APP:(NAME): Action: Event Only` | HS | A flight app stopped running (hung), not just a paused sim. |
 
@@ -230,6 +233,10 @@ cFS watches for two faults on its own. The response is the same command you woul
 | Axial thruster under-delivery | During APPROACH, 3 cycles in a row where the accelerometer measures less than half the Δv the axial burns should have given | **HOLD** |
 | Navigation lost on approach | During APPROACH, NAV's relative solution unusable for 10 cycles (2 s) in a row | **ABORT** |
 | LIDAR disagreeing on approach | During APPROACH, 5 LIDAR fixes in a row rejected by NAV's innovation gate | **HOLD** |
+| Approach overspeed | During APPROACH or HOLD, closing faster than the approach envelope (0.36 m/s beyond 20 m, tapering to 0.15 m/s inside 10 m) for 5 cycles | **HOLD** |
+| Out of the approach corridor | Inside 20 m, outside the 15° approach cone for 5 cycles | **ABORT** |
+
+Every ABORT, automatic or yours, is now an active **collision-avoidance manoeuvre** (DEPART on the console): the vehicle backs away along the docking axis and only then coasts. Watch the FDIR panel's *Free drift: closest approach*. It's GNC's prediction of how close the port would come if every thruster stopped now, and the retreat continues until it reads 10 m or more.
 
 After an automatic response, recover the way you would from your own ABORT or HOLD (fix the cause, then `go`), **and** send `python3 gnc_cmd.py rearm`. A response only fires once until it is re-armed. The ground console's FDIR panel shows each response as `ACTIVE` (armed) or `PASSIVE` (fired, needs re-arm). Pausing Unity for more than a few seconds while guidance is active counts as link loss by design. Expect an ABORT when you unpause.
 

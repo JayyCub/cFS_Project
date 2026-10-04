@@ -59,7 +59,7 @@ public class UdpCommandReceiver : MonoBehaviour
     /// </summary>
     public bool LockStepEngaged { get; set; }
 
-    /// <summary>Most recent GNC phase (GNC_Phase_t: 0=IDLE … 4=HOLD, 5=MANUAL); -1 before any command.</summary>
+    /// <summary>Most recent GNC phase (GNC_Phase_t: 0=IDLE … 4=HOLD, 5=MANUAL, 6=DEPART); -1 before any command.</summary>
     public int GncPhase { get; private set; } = -1;
 
     /// <summary>Last valve on-times applied (s per thruster). Null before any command.</summary>

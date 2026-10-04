@@ -149,6 +149,7 @@
   .phase-badge.DOCKED   { color: var(--green);   border-color: #1a4a22; background: #0a1c0f; }
   .phase-badge.HOLD     { color: #c080ff;        border-color: #4a2080; background: #160c28; }
   .phase-badge.MANUAL   { color: #ff9a40;        border-color: #5a3010; background: #1e1006; }
+  .phase-badge.DEPART   { color: var(--red);     border-color: #5a1a1a; background: #1e0808; }
   .fdir-row { display:flex; justify-content:space-between; font-size:11px; padding:3px 0; }
   .fdir-row .lbl { color: var(--textdim); }
 
@@ -467,6 +468,9 @@
       <div class="fdir-row"><span class="lbl">LC state</span><span id="fdir-lc">---</span></div>
       <div id="fdir-aps"></div>
       <div class="fdir-row"><span class="lbl">Axial under-delivery streak</span><span id="fdir-streak">---</span></div>
+      <div class="fdir-row"><span class="lbl">Overspeed / corridor streak</span><span id="fdir-env">---</span></div>
+      <div class="fdir-row"><span class="lbl">Free drift: closest approach</span><span id="fdir-drift">---</span></div>
+      <div class="fdir-row"><span class="lbl">Abort retreat Δv</span><span id="fdir-cam">---</span></div>
     </div>
 
     <div class="tlm-sep" style="margin-top:14px;"></div>
@@ -632,6 +636,14 @@ function updateGnc(d) {
   const stEl = document.getElementById('fdir-streak');
   stEl.textContent = streak;
   stEl.className = streak >= 3 ? 'red' : streak > 0 ? 'yellow' : 'green';
+  if (d.overspeed !== undefined) {
+    const env = Math.max(d.overspeed, d.corridor);
+    set('fdir-env', `${d.overspeed} / ${d.corridor}`, env >= 5 ? 'red' : env > 0 ? 'yellow' : 'green');
+    set('fdir-drift', d.drift_safe_m > 0 ? `${d.drift_safe_m.toFixed(1)} m` : '---',
+        d.drift_safe_m >= 10 ? 'green' : d.drift_safe_m > 0 ? 'yellow' : 'gray');
+    set('fdir-cam', d.phase === 'DEPART' || d.cam_dv > 0 ? `${d.cam_dv.toFixed(3)} m/s` : '---',
+        d.phase === 'DEPART' ? 'red' : 'gray');
+  }
   const stale   = d.stale_sec ?? 0;
   const cmdErr  = d.cmd_err  ?? 0;
 
@@ -811,7 +823,7 @@ function setBadge(id, phase) {
 }
 
 function phaseClass(phase) {
-  const map = {IDLE:'gray', CORRECT:'yellow', APPROACH:'cyan', DOCKED:'ok', HOLD:'', MANUAL:'yellow'};
+  const map = {IDLE:'gray', CORRECT:'yellow', APPROACH:'cyan', DOCKED:'ok', HOLD:'', MANUAL:'yellow', DEPART:'red'};
   return map[phase] || '';
 }
 

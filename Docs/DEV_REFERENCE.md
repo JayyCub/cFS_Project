@@ -105,7 +105,8 @@ Defined in `gnc_app.h` as `GNC_Phase_t`. Transitions are computed in `GNC_APP_Se
     │     DOCKED (3)        │  Contact confirmed. No thrust. Terminal state.
     └──────────────────────┘
 
-    Any state ──ABORT──► IDLE  (AbortLatch set; GO required to release)
+    Any undocked flying state ──ABORT──► DEPART (6) ──retreat done, drift safe──► IDLE
+                                         (AbortLatch set; GO refused during DEPART, required after)
     Any undocked state ──hand-controller deflection──► MANUAL (5)  (crew flying; GO → CORRECT)
 ```
 
@@ -120,7 +121,7 @@ Defined in `gnc_app.h` as `GNC_Phase_t`. Transitions are computed in `GNC_APP_Se
 
 `SelectPhase()` also checks the Docked flag (bit 1 of telemetry Flags) and the HOLD command; those override gate logic. HOLD is sticky — only a ground `GO` or `ABORT` releases it; autonomous gate transitions never override a ground-commanded hold.
 
-**Autonomous hold points:** each hold point fires at most once per approach sequence and is re-armed only by `ABORT`+`GO` (which implies a scenario reset). The trigger range is adjusted by a brake-distance lookahead (`v²/AxialBrakeAccel_mss`) so the vehicle actually stops near the configured waypoint rather than overshooting it. When a hold point fires — or a ground `HOLD` command is received — `GNC_APP_Data.HoldRange_m` captures the current range; this becomes the axial position-hold target (see Channel 1 below).
+**Autonomous hold points:** each hold point fires at most once per approach sequence and is re-armed only by `ABORT`+`GO` (which implies a scenario reset). The trigger range is adjusted by a brake-distance lookahead (`v²/(2·AxialBrakeAccel_mss) + 2·v·dt`, realism phase 5) so the vehicle actually stops near the configured waypoint rather than overshooting it. When a hold point fires — or a ground `HOLD` command is received — `GNC_APP_Data.HoldRange_m` captures the current range; this becomes the axial position-hold target (see Channel 1 below).
 
 ---
 
@@ -135,9 +136,11 @@ L = Inertia_kgm2[axis] × Δω   (N·m·s, per axis — roll inertia is half of 
 
 The cFS **RCS app** turns that into valve on-times. It runs NNLS allocation over its thruster table, then PWM: 20 ms minimum impulse bit, 0.19 s per-cycle maximum, and direction-preserving scaling when a request saturates. So GNC no longer carries thruster force, moment arms, per-group accelerations or burn-duration limits. Phase 2 removed the brake-group choice, the shared-duration rescaling and the 0.65 CORRECT-phase +Fz coupling fudge, because they all existed to compensate for GNC not knowing the geometry.
 
+Translation is worked out in the **docking frame D** (X/Y lateral, +Z toward the port) and rotated into body axes with NAV's attitude (`AttQuat_L`) and docking-frame quaternion (`DockFrameQuat_L`). Before realism phase 5, body and world axes were assumed to coincide.
+
 ### Clohessy-Wiltshire feedforward
 
-The predicted CW Δv for one cycle is folded into each channel's velocity error, using the +V-bar LVLH mapping (radial = +Y, along-track = −Z, cross-track = +X):
+The predicted CW Δv for one cycle, using the +V-bar LVLH mapping (radial = +Y, along-track = −Z, cross-track = +X):
 
 ```c
 a_rad   =  3n²·RelPos_Y + 2n·(−RelVel_Z)     ff_y = −a_rad·dt
@@ -145,37 +148,53 @@ a_along = −2n·RelVel_Y                        ff_z = +a_along·dt   (world az
 a_cross = −n²·RelPos_X                        ff_x = −a_cross·dt
 ```
 
-Known limitation (roadmap phase 5): the lateral feed-forward is added inside the deadbanded velocity error, so the ~5×10⁻⁵ m/s-per-cycle V-bar Coriolis term never builds up into a burn by itself.
+It's rotated into the docking frame and **accumulated per axis**. Once an axis reaches `FfReleaseDv_ms` (about one minimum impulse bit) it's added to that cycle's request in one piece, outside any deadband. Before phase 5 it was added inside the deadbanded lateral velocity error, so the ~5×10⁻⁵ m/s-per-cycle V-bar Coriolis term never built up into a burn.
 
 ### Channel breakdown
 
-**Channel 1 — Axial (body Z)**
+**Channel 1 — Axial (docking frame Z)**
 
 ```
-APPROACH:  v_target = clamp(AxialKp × range, MinCloseSpeed, cap)
+APPROACH:  v_target = min(clamp(AxialKp × range, MinCloseSpeed, cap), ProfileGuideFrac × envelope(range))
              cap = MaxCloseSpeed before HoldPoint1_m fires, MaxCloseSpeed_Inner after
 HOLD:      v_target = clamp(AxialHoldKp × (Range_m − HoldRange_m), ±MaxHoldSpeed)
 CORRECT:   v_target = 0
-Δv_z = v_target − ClosingSpeed_ms + ff_z
+Δv_z = v_target − ClosingSpeed_ms
 ```
 
 **Channel 2 — Lateral X / Y** (steers on the port-relative `LatOffset_X/Y`)
 
 ```
 v_target = clamp(−Kp × LatOffset, ±MaxLatSpeed)     Kp = LatKp (CORRECT/HOLD), LatKp_Approach (APPROACH)
-v_error  = v_target − RelVel + ff
+v_error  = v_target − LatVel                          (port point velocity, or CoM if LatVelAtPort = 0)
 Δv       = v_error ∓ deadband   if |v_error| > deadband, else 0
              deadband = LatVelDeadband_ms (CORRECT), LatVelDeadband_Approach_ms (APPROACH)
 ```
 
-**Channel 3 — Attitude (pitch/yaw/roll, all active phases)**
+`LatKp_Approach` = 0.03 and `LatVelDeadband_Approach_ms` = 1 mm/s came out of a Monte Carlo trade (phase 5). The old 0.006 / 2 mm/s left lateral offsets inside 0.33 m uncontrolled, and contact lateral averaged 5 cm against a 10 cm limit.
+
+**Channel 3 — Attitude (pitch/yaw/roll, per axis, all active phases): phase plane**
 
 ```
-omega_target = clamp(AttKp × error_rad, ±MaxAttRate)
-Δω           = omega_target − AngVel
+e        = |error| − deadband                       deadband = AttDeadband_deg × (0.5 APPROACH, 2 CORRECT, 1 HOLD/DEPART)
+ω_target = sign(error) × min(AttKp·e, sqrt(2·AttCtrlAccel_rads2·e), MaxAttRate)    (0 inside the deadband)
+Δω       = ω_target − AngVel, unless |ω_target − AngVel| ≤ AttRateDeadband_rads
+             (SpinThreshold_rads inside the angle deadband)
 ```
 
-This channel is skipped when all three errors are inside `AttDeadband_deg` (×0.5 in APPROACH, ×2 in CORRECT) **and** no axis spins faster than `SpinThreshold_rads`.
+The square-root term is the braking curve: the fastest rate the RCS can still stop from at the planned deceleration. Inside the deadband a slow drift walks to the edge and is turned round there, which is the classic RCS limit cycle.
+
+**DEPART — abort, collision-avoidance manoeuvre**
+
+```
+direction = −Z of the docking frame, in body axes (straight back along the body docking axis if attitude is unknown)
+Δv request = CamDeltaV_ms − delivered, then GNC_CAM_STEP_MS per cycle while the free drift isn't passively safe,
+             never past CamMaxDeltaV_ms; attitude held (phase plane, 1× deadband)
+delivered  = IMU Δv along the direction (the commanded Δv if the IMU is out)
+ends (→ IDLE) when delivered ≥ CamDeltaV_ms and the drift is safe (or NAV can't tell), at CamMaxDeltaV_ms, or after 60 s
+```
+
+**Passive safety** (`GNC_APP_DriftSafeRange`): every cycle GNC propagates NAV's CoM state with the closed-form Clohessy-Wiltshire (Hill) solution, attitude held. It reports the closest the port would come to the target port between `PassiveSafeStart_s` (120 s) and `PassiveSafeHorizon_s` (one orbit) if all thrusters stopped now. This goes out as STATE `DriftSafeRange_m`, and it's "safe" at ≥ `PassiveSafeRange_m`.
 
 **MANUAL — crew hand controllers** (`HandController.cs` → `Thc`/`Rhc` in SIM_STATE)
 
@@ -189,11 +208,11 @@ Any stick deflection over 0.5 enters MANUAL from any undocked phase, including I
 
 ---
 
-## UDP Interface (SimLink v4)
+## UDP Interface (SimLink v5)
 
 The byte-level layouts, framing, CRC and lock-step protocol are defined in **[SIMLINK_ICD.md](SIMLINK_ICD.md)**. Short version:
 
-- Unity sends a 116-byte `SIM_STATE` frame (raw sensor readings + crew hand controllers + capture switch) to port 5005 once per GNC cycle (0.2 s of sim time), then holds that physics step.
+- Unity sends a 132-byte `SIM_STATE` frame (raw sensor readings + crew hand controllers + capture switch) to port 5005 once per GNC cycle (0.2 s of sim time), then holds that physics step.
 - cFS `sim_io` validates the frame and publishes it on the Software Bus. `nav` publishes a navigation solution; `gnc_app` runs one cycle on it and publishes an impulse request; `rcs` allocates it and publishes `THRUSTER_CMD` (valve on-times); `sim_io` frames that back to Unity on port 5006 with the same Seq.
 - Unity applies the command in the same physics step and continues. With no answer within 500 ms it drops to free-running, and it re-engages automatically.
 - If no command arrives for 3 s, `UdpCommandReceiver` clears cFS authority and zeros the thrusters.
@@ -210,16 +229,22 @@ The byte-level layouts, framing, CRC and lock-step protocol are defined in **[SI
 | `MinCloseSpeed` / `MaxCloseSpeed` / `MaxCloseSpeed_Inner` | 0.10 / 0.30 / 0.10 | m/s | Axial speed floor, outer cap, inner cap |
 | `VehicleMass` | 12000 | kg | FSW mass model (impulse = m·Δv) |
 | `Inertia_kgm2` | 48000, 48000, 24000 | kg·m² | FSW inertia model per body axis (impulse = I·Δω) |
-| `LatKp` / `LatKp_Approach` | 0.02 / 0.006 | 1/s | Lateral position gains |
+| `LatKp` / `LatKp_Approach` | 0.02 / 0.03 | 1/s | Lateral position gains |
 | `MaxLatSpeed` | 0.05 | m/s | Lateral speed cap |
-| `LatVelDeadband_ms` / `_Approach_ms` | 0.00035 / 0.002 | m/s | Lateral velocity deadbands |
-| `AttKp` / `MaxAttRate` | 0.25 / 0.20 | (rad/s)/rad, rad/s | Attitude gain and rate cap |
+| `LatVelDeadband_ms` / `_Approach_ms` | 0.00035 / 0.001 | m/s | Lateral velocity deadbands |
+| `AttKp` / `MaxAttRate` | 0.25 / 0.02 | (rad/s)/rad, rad/s | Attitude gain and slew-rate cap (0.20 before phase 5) |
 | `AttDeadband_deg` / `SpinThreshold_rads` | 1.0 / 0.003 | deg, rad/s | Attitude deadband and spin override |
 | `HoldPoint1_m` / `HoldPoint2_m` | 20 / 3 | m | Autonomous hold points (0 = off) |
 | `AxialBrakeAccel_mss` | 0.189 | m/s² | Planning estimate for the hold-point braking lookahead only |
 | `ManualAccel_mss` / `ManualRate_rads` / `ManualRateDeadband_rads` | 0.02 / 0.0175 / 0.0008 | m/s², rad/s | Crew hand-controller authority |
 | `EntrySettleCycles` | 15 | cycles | CORRECT → APPROACH settle gate (integer since phase 3) |
 | `LatVelAtPort` | 1 | 0/1 | Lateral channel velocity: 1 = docking-port point velocity (v_cm + ω×r), 0 = CoM velocity (pre-phase-4) |
+| `AttCtrlAccel_rads2` / `AttRateDeadband_rads` | 0.01 / 0.0004 | rad/s², rad/s | Phase-plane braking deceleration and rate deadband |
+| `FfReleaseDv_ms` | 0.0007 | m/s | CW feed-forward accumulator release (≈ one minimum impulse bit) |
+| `ProfileRange_m` / `ProfileMaxClose_ms` / `ProfileGuideFrac` | 0,10,20,1000 m / 0.15,0.15,0.36,0.36 m/s / 0.9 | | Approach envelope (overspeed monitor) and guidance cap |
+| `CorridorCheckRange_m` | 20 | m | Corridor monitor applies inside this range |
+| `CamDeltaV_ms` / `CamMaxDeltaV_ms` | 0.10 / 0.30 | m/s | Abort retreat: nominal and cap |
+| `PassiveSafeRange_m` / `_Start_s` / `_Horizon_s` | 10 / 120 / 5600 | m, s | Passive-safety criterion for ending the retreat |
 
 Fault thresholds (sim link loss after 2 s, 3-cycle axial under-delivery) are not GNC parameters. They are LC watchpoints; see [Fault Protection](#fault-protection-fdir-lc--sc).
 
@@ -270,6 +295,8 @@ The Unity scene is the real hardware and cFS tables are flight software's model 
 ---
 
 ## Fault Protection (FDIR: LC → SC)
+
+Actionpoints 4 and 5 (realism phase 5) watch the approach envelope from GNC STATE's streak counters: `OverspeedStreak ≥ 5` → RTS 3 (HOLD), `CorridorStreak ≥ 5` → RTS 2 (ABORT, which is now the retreat manoeuvre). GNC only counts in the phases where each rule applies. `GNC_APP_LC_CYCLE_AP_LAST` = 5.
 
 Actionpoints 2 and 3 (realism phase 4b) watch navigation: GNC STATE's `NAV_INVALID` flag for 10 cycles during APPROACH → RTS 2 (ABORT), and NAV SOLUTION's `ConsecRpsRejects ≥ 5` during APPROACH → RTS 3 (HOLD). Like AP 1 they're sampled by gnc_app at the end of each cycle (`GNC_APP_LC_CYCLE_AP_LAST` = 3).
 
@@ -337,6 +364,19 @@ Set `HoldPoint1_m` and/or `HoldPoint2_m` in `gnc_param_tbl.c` (0 disables a wayp
 
 The feedforward is hardcoded in `GNC_APP_ComputeControl()` using `GNC_CW_MEAN_MOTION` (a `#define` in `gnc_app.h`, not yet in the parameter table). Add it to `GNC_ParamTbl_t` in `gnc_app_tbl.h` if you want to tune it at runtime.
 
+### Run the docking Monte Carlo
+
+`cFS/apps/gnc_app/unit-test/dock_mc.c` flies the real `gnc_app.c`, `nav_filter.c` and `rcs_alloc.c` (with their default tables, cFE stubbed out) in closed loop against a 6-DOF truth model. Each run disperses the start pose and rates, sensor biases, thruster thrust and alignment, the true CoM, mass and inertia. Run it in the cfs-dev container from `cFS/` after any GNC, NAV or RCS change:
+
+```bash
+bash apps/gnc_app/unit-test/run_mc.sh build-native_std -- -n 200            # docking: capture rate + contact stats
+bash apps/gnc_app/unit-test/run_mc.sh build-native_std -- -n 100 -m abort   # ABORT at a random range: never hit the station
+bash apps/gnc_app/unit-test/run_mc.sh build-native_std -- -n 60 -p LatKp_Approach=0.02   # trade study on a gain
+bash apps/gnc_app/unit-test/run_mc.sh build-native_std -- -n 5 -v 2         # run 2 with GNC events printed
+```
+
+Phase 5 numbers (200 + 100 runs): 100 % capture; contact lateral 1.0 cm mean, 2.3 cm worst (limit 10); 11 kg propellant mean (19 kg before phase 5); 100 % of aborts clear of the station (68 % before, when ABORT just coasted).
+
 ### Check the thruster hardware / regenerate the RCS table
 
 With cFS stopped, press **F8** in Unity to run `ThrusterDiagnostic.cs`. It fires each thruster group and each thruster alone, then logs measured vs geometry-predicted ΔV/Δω (`[DIAG]`, with a `*** MEASURED != PREDICTED ***` flag). After moving or re-canting thrusters, run RCSModel's **"Log cFS thruster table"** context-menu item and paste the rows into `cFS/apps/rcs/fsw/tables/rcs_thr_tbl.c`. There are no GNC acceleration constants to recalibrate any more.
@@ -392,6 +432,7 @@ Sent to CI_LAB on port 1234. Every command is acknowledged by an EVS event in th
 | 28 | LINK_INF | Sim link restored after ≥ 2 s of silence (informational) |
 | 29 | MANUAL_INF | Crew hand-controller takeover |
 | 30 | NAV_INF | NAV relative solution became unusable (translation coasts) or usable again |
+| 31 | CAM_INF | Abort manoeuvre complete (Δv delivered, free-drift closest approach) |
 
 ---
 

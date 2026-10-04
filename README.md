@@ -102,7 +102,7 @@ It publishes that request. The `rcs` app works out which thrusters to fire and f
 
 **Safety features:**
 
-- **Abort latch**: the system starts guidance-inhibited and requires an explicit GO command before any thrust fires. An ABORT command sets the latch, and the next lock-step cycle commands zero thrust. Loss of the sim link for `TlmLossTimeoutSec` latches the same state automatically. Guidance stays inhibited until GO is sent again.
+- **Abort latch**: the system starts guidance-inhibited and requires an explicit GO command before any thrust fires. An ABORT command sets the latch and flies a collision-avoidance manoeuvre: the vehicle backs away along the docking axis until its free drift is passively safe, then coasts. Loss of the sim link for `TlmLossTimeoutSec` latches the same state automatically. Guidance stays inhibited until GO is sent again.
 - **CCSDS command dispatch**: all ground commands arrive as properly-formatted CCSDS packets (NOOP, RESET\_COUNTERS, HOLD, GO, ABORT). Unknown function codes and malformed packet lengths generate EVS error events.
 - **CFE\_TBL parameter management**: all GNC gains live in a `CFE_TBL`-managed struct (`GNC_ParamTbl_t`) rather than compiled `#define` constants. Parameters can be changed by uplink to a running cFS instance without recompile or restart. The `ProcessSimState` cycle calls `CFE_TBL_Manage` every cycle to pick up newly activated table images.
 - **LC safety monitoring**: limit-checker watchpoints on closing speed, lateral offset, and telemetry staleness fire an automatic ABORT (via the SC stored-commands app) if any threshold is exceeded.
@@ -160,7 +160,7 @@ python3 gnc_cmd.py <command>
 | `reset` | Zeros HK counters (CmdCount, CmdErrCount, UdpPacketsReceived). |
 | `hold` | Freeze at current range. GNC station-keeps with no axial closure. |
 | `go` | Release a hold or the startup pre-latch. Resumes guidance from CORRECT phase. |
-| `abort` | Emergency stop. Sends immediate coast to Unity; inhibits guidance until GO. |
+| `abort` | Collision-avoidance manoeuvre: retreat until the free drift is passively safe, then coast; inhibits guidance until GO. |
 
 Every command is acknowledged by an EVS event in the cFS console. GO is rejected if guidance is already active.
 

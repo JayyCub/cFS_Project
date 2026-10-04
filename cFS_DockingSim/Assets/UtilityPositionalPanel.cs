@@ -13,7 +13,7 @@ public class UtilityPositionalPanel : MonoBehaviour
 
     static readonly Color VelColor = new Color(1f, 0.88f, 0.55f, 1f);
 
-    static readonly string[] GncPhaseNames = { "IDLE", "CORRECT", "APPROACH", "DOCKED", "HOLD", "MANUAL" };
+    static readonly string[] GncPhaseNames = { "IDLE", "CORRECT", "APPROACH", "DOCKED", "HOLD", "MANUAL", "DEPART" };
     static readonly Color[]  GncPhaseColors =
     {
         new Color(0.50f, 0.50f, 0.50f, 1f),

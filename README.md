@@ -2,167 +2,205 @@
 
 *A project by Jacob Thomsen*
 
-A hardware-in-the-loop spacecraft docking simulator built on NASA's Core Flight System (cFS). A Unity physics engine simulates a chaser vehicle in LEO; a real C flight software application running inside cFS computes the guidance, navigation, and control (GNC) logic; the two communicate over UDP in real time.
+A spacecraft rendezvous-and-docking simulator in which a Crew Dragon–style chaser docks to the International Space Station, flown by **real flight software** running on NASA's Core Flight System (cFS). Unity simulates the physical world and the vehicle's hardware; custom C flight apps inside cFS do the navigation, guidance, control, thruster selection, and fault protection; the two run in lock-step over a framed, CRC-checked UDP link.
+
+The rule that governs everything: **Unity is only the physical world. All decision-making is flight software.** Unity produces noisy sensor readings and opens valves; cFS has to work out where it is, decide what to do, pick thrusters, and notice when something is wrong.
 
 This is a learning project. Every design decision is made to mirror how real flight software works.  
 *(Well also I don't have an orbital spacecraft available to me)*
 
+> **Want the full tour?** [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) is the master guide to how every subsystem works. This README is the short version.
+
 **Technologies used:**
-- **C** — GNC flight software application (`gnc_app`) running inside NASA cFS
-- **C#** — Unity scripts for 6-DOF physics, RCS model, telemetry sender, and command receiver
-- **Python** — ground command tool (`gnc_cmd.py`) that sends CCSDS packets to cFS
-- **NASA cFS / cFE** — real flight software framework providing the scheduler, event system, table manager, and software bus
-- **Unity 6** — physics simulation and scene rendering (plant model only; no guidance logic)
-- **Docker** — containerized cFS build and runtime environment
+- **C** — four custom cFS flight apps: `sim_io`, `nav`, `gnc_app`, `rcs`
+- **NASA cFS / cFE 7 (Draco)** — Software Bus, scheduler, events, table manager, plus NASA's LC, SC, DS, and HS apps for fault protection, flight recording, and health monitoring
+- **C#** — Unity scripts for 6-DOF physics, Clohessy-Wiltshire orbital mechanics, sensor models, RCS valves, and the SimLink interface
+- **Python** — browser ground console, command uplink, flight-data-recorder decoder, and an end-to-end hardware-in-the-loop test harness (standard library only)
+- **Unity 6** — physics simulation and scene rendering
+- **Docker / WSL** — containerized cFS build and runtime environment
 - **Blender** — tweaking 3D models of the International Space Station and SpaceX Crew Dragon capsule
 
 ---
 
 ## Real-World Context
 
-Spacecraft rendezvous and proximity operations (RPOD) require a flight computer to receive sensor telemetry, run a control law, and publish thruster commands on a schedule while being commanded and monitored from the ground. SpaceX Dragon, Boeing Starliner, and NASA Orion all follow this pattern on final approach to a station.
+Spacecraft rendezvous and proximity operations (RPOD) require a flight computer to read its sensors, estimate where it is, run a control law, fire thrusters, and protect the vehicle when something fails, all while being commanded and monitored from the ground. SpaceX Dragon, Boeing Starliner, and NASA Orion all follow this pattern on final approach to a station.
 
 This project maps that architecture to accessible tools:
 
 | Real Spacecraft | This Project |
 |-----------------|--------------|
-| Flight computer running VxWorks or similar RTOS | Docker container running NASA cFS on Linux |
-| Inertial measurement unit, LIDAR range sensor | Unity physics engine streaming 10 Hz UDP telemetry |
-| Thruster control electronics | Unity `RCSModel.cs` receiving timed-burn command packets |
-| CCSDS ground command uplink | `gnc_cmd.py` sending CCSDS packets to cFS CI\_LAB |
-| Onboard parameter tables (uplinked in-flight) | `CFE_TBL`-managed gain table, live-uplink capable |
-| EVS event log (downlinked to ground) | cFS EVS messages printed to the operator console |
-| Dragon hold-and-proceed waypoints | Abort latch + GO/HOLD/ABORT command interface |
+| Flight computer running an RTOS | Docker container running NASA cFS on Linux |
+| Gyro, accelerometer, star tracker, docking LIDAR | `ChaserSensors.cs`: truth degraded with noise, bias, field of view, range limits, and dropouts |
+| Avionics bus and device driver | SimLink protocol (sync word, sequence numbers, CRC-16) owned by one device-I/O app, `sim_io` |
+| Onboard navigation filter | `nav`: attitude MEKF + 9-state translation Kalman filter |
+| Thruster control electronics | `rcs` computes valve on-times; Unity's `RCSModel.cs` just opens and closes 16 valves |
+| Onboard fault detection and response | LC (Limit Checker) watchpoints trigger SC (Stored Command) sequences: HOLD or a collision-avoidance ABORT |
+| Flight data recorder | DS (Data Storage) recorder files, decoded on the ground by `tools/fdr_decode.py` |
+| Onboard parameter tables (uplinked in-flight) | `CFE_TBL` tables with load-time validators for every gain, limit, noise model, and geometry value |
+| Mission control | `ground_console.py` browser console + `gnc_cmd.py` CCSDS command uplink |
+| Dragon hold-and-proceed waypoints | Autonomous hold points at 20 m and 3 m, released by GO |
 
-Clohessy-Wiltshire differential gravity equations run continuously in Unity, producing the relative-motion drift a real chaser would experience at ISS altitude (n = 0.00113 rad/s). The GNC computes a feedforward delta-v each lock-step cycle that cancels this drift before it accumulates, the same technique real rendezvous GNC uses.
+Clohessy-Wiltshire differential gravity runs continuously in Unity, producing the relative-motion drift a real chaser experiences at ISS altitude (n = 0.00113 rad/s). Flight software uses the same equations in its navigation filter, its drift feed-forward, and its abort passive-safety check.
 
 ---
 
 ## System Architecture
 
-```
-┌─────────────────────────────────────┐        ┌───────────────────────────────────┐
-│           Unity (Mac)               │        │       cFS (Docker container)      │
-│                                     │        │                                   │
-│  ┌──────────────────────────────┐   │ SimLink│  ┌──────────────────────────────┐ │
-│  │  Physics Simulation          │   │  UDP   │  │  sim_io (device I/O app)     │ │
-│  │  6-DOF dynamics              │ SIM_STATE  │  │  only app that owns sockets  │ │
-│  │  Clohessy-Wiltshire drift    │───────────>│  │  validates SimLink frames    │ │
-│  │  Docking corridor / detector │ port 5005 │  └──────┬───────────────▲───────┘ │
-│  │  HandController (crew keys)  │   │        │   SIM_STATE (SB)  THRUSTER_CMD (SB)│
-│  │  UdpTelemetrySender =        │   │        │  ┌──────▼───────┐ ┌─────┴────────┐ │
-│  │    lock-step master          │   │        │  │  gnc_app     │ │  rcs         │ │
-│  └──────────────────────────────┘   │        │  │  phases,     │─▶ NNLS alloc + │ │
-│  ┌──────────────────────────────┐   │        │  │  control law │ │ PWM (valve   │ │
-│  │  UdpCommandReceiver →        │<───────────│  │  → impulse   │ │ on-times)    │ │
-│  │  RCSModel: 16 valves, full   │THRUSTER_CMD│  └──────────────┘ └──────────────┘ │
-│  │  thrust for each on-time     │ port 5006 │  SCH_LAB: 1 Hz HK requests only    │
-│  └──────────────────────────────┘   │        │                                   │
-└─────────────────────────────────────┘        └───────────────────────────────────┘
-                                                               ^
-                                                               │ CCSDS commands
-                                                          port 1234 (CI_LAB)
-                                                               │
-                                                    python3 gnc_cmd.py go/hold/abort
+```mermaid
+flowchart LR
+    subgraph UNITY["Unity: the physical world + vehicle hardware"]
+        PHYS["6-DOF physics<br/>CW orbital gravity"]
+        SENS["Sensors<br/>gyro · accel · star tracker · LIDAR"]
+        RCSM["RCSModel<br/>16 Draco valves"]
+        PHYS --> SENS
+        RCSM --> PHYS
+    end
+
+    subgraph CFS["cFS flight computer (Docker)"]
+        SIMIO["sim_io<br/>device I/O"]
+        NAV["nav<br/>MEKF + Kalman filter"]
+        GNC["gnc_app<br/>phases · guidance · control"]
+        RCS["rcs<br/>NNLS allocation + PWM"]
+        FDIR["LC → SC<br/>fault protection"]
+        DS["DS recorder · HS"]
+        SIMIO -- SIM_STATE --> NAV -- NAV_SOLUTION --> GNC -- impulse --> RCS -- valve on-times --> SIMIO
+        GNC --> FDIR -- HOLD / ABORT --> GNC
+        GNC --> DS
+    end
+
+    subgraph GROUND["Ground (host)"]
+        CONSOLE["ground_console.py<br/>browser console"]
+        CMD["gnc_cmd.py"]
+    end
+
+    SENS -- "SIM_STATE · UDP 5005" --> SIMIO
+    SIMIO -- "THRUSTER_CMD · UDP 5006" --> RCSM
+    CFS -- "telemetry · UDP 2234" --> CONSOLE
+    CMD -- "CCSDS commands · UDP 1234" --> CFS
 ```
 
-Flight software makes every thruster decision. `gnc_app` computes the impulse it wants each cycle. The cFS `rcs` app allocates that impulse across the 16 thrusters from its own thruster table, using non-negative least squares, and converts it into per-valve on-times, honoring the minimum impulse bit and the per-cycle maximum. The cFS→Unity packet is just those valve on-times: Unity opens each valve at full Draco thrust and closes it on time. Keyboard piloting goes through cFS too, as simulated crew hand controllers that GNC flies in a MANUAL phase.
+Once every 0.2 s of simulation time:
+
+1. Unity samples its sensors, sends one `SIM_STATE` frame, and **pauses its physics** until cFS answers.
+2. `sim_io` validates the frame (sync, version, length, CRC) and publishes it on the Software Bus.
+3. `nav` estimates attitude and relative position and velocity, and publishes a `NAV_SOLUTION`.
+4. `gnc_app` runs its phase logic and control law and requests an impulse.
+5. `rcs` decides which thrusters fire and for how long.
+6. `sim_io` sends the valve on-times back to Unity, which fires them and resumes physics.
+
+Because the arrival of `SIM_STATE` *is* the clock tick, runs are deterministic and repeatable, and a slow frame or a paused editor never desynchronizes the two sides. The round trip inside cFS typically takes under a millisecond.
 
 ---
 
 ## Components
 
-### GNC Application (cFS / C)
+### Flight software (cFS / C)
 
-`gnc_app` is a standard cFS application written in C that runs inside NASA's Core Flight Executive (cFE). It owns no sockets: it runs one guidance cycle for every `SIM_STATE` message that the `sim_io` app publishes on the Software Bus. That is 5 Hz of simulation time, in lock-step with Unity. Its output is an impulse request on the Software Bus, which the `rcs` app turns into valve on-times (`THRUSTER_CMD`).
+| App | Origin | Job |
+|-----|--------|-----|
+| `sim_io` | this project | The only app that touches sockets, like a 1553 or SpaceWire driver app. Validates SimLink frames, counts bad CRCs, sequence gaps, and stale answers |
+| `nav` | this project | Attitude multiplicative EKF (with gyro-bias estimation) and a 9-state translation Kalman filter (CW dynamics, accelerometer bias). Fuses gyro, accelerometer, star tracker, and LIDAR range/bearing/pose. Chi-square gating, automatic re-initialisation, validity flags |
+| `gnc_app` | this project | Phase state machine, docking-frame guidance, phase-plane attitude control, approach monitors, and the abort manoeuvre |
+| `rcs` | this project | Non-negative least squares thruster allocation over its own thruster table, then pulse-width modulation with a 20 ms minimum impulse bit |
+| LC / SC | NASA | Limit Checker decides when a measurement is a fault; Stored Command responds with the same GO/HOLD/ABORT commands an operator would send |
+| DS / HS | NASA | Onboard flight-data recorder; health monitor that alerts if a flight app stops running |
+| CI_LAB / TO_LAB / SCH_LAB | NASA samples | Command uplink, telemetry downlink, and 1 Hz housekeeping |
 
-**Phase state machine** (modeled on Dragon RPOD):
+The navigation and allocation maths live in cFE-free files (`nav_filter.c`, `rcs_alloc.c`), so the exact flight code can also be compiled into test harnesses (see [Testing](#testing-and-verification)).
 
-| Phase | Trigger | Control law |
-|-------|---------|-------------|
-| `IDLE` | No telemetry received, or AbortLatch set | All thrust inhibited |
-| `CORRECT` | Lateral offset > gate | Station-keep axially; drive lateral position to zero |
-| `APPROACH` | Lateral offset < gate | Proportional axial closure (tiered speed cap, see below) + lateral velocity damping |
-| `HOLD` | Ground command, or an autonomous hold-point range is reached | Station-keep at the range where HOLD was entered — position *and* velocity feedback, not just velocity damping |
-| `DOCKED` | Contact flags set | All thrust inhibited |
+**GNC phases** (modelled on Dragon RPOD):
 
-A hysteresis pair on lateral offset prevents rapid phase toggling. Every transition generates an EVS event visible in the operator console.
+| Phase | What GNC does |
+|-------|---------------|
+| `IDLE` | Nothing fires. Boot state (guidance inhibited until GO), and after an abort manoeuvre |
+| `CORRECT` | Holds range and drives the docking port onto the approach axis |
+| `APPROACH` | Closes along the axis: 0.30 m/s cap before the 20 m hold point, 0.10 m/s after, never above 90 % of the approach envelope |
+| `HOLD` | Station-keeps at the 20 m and 3 m hold points or on command; released by GO |
+| `MANUAL` | Crew flies with the hand controllers (keyboard), with rate hold on the rotation stick |
+| `DEPART` | Abort: retreats along the docking axis until the free drift is passively safe, then coasts to IDLE |
+| `DOCKED` | Captured. Nothing fires |
 
-**Autonomous hold points and tiered approach speed:** two range thresholds (`HoldPoint1_m` / `HoldPoint2_m`, defaults 20 m / 3 m) automatically transition APPROACH → HOLD, modeling Dragon's manual GO/NO-GO waypoints — each fires once per approach and needs an explicit `GO` to continue. Before the outer hold point fires, the axial closure speed is capped by `MaxCloseSpeed` (0.3 m/s); afterward it's capped by the tighter `MaxCloseSpeed_Inner` (0.1 m/s) for the rest of the approach, mirroring the outer/inner closing-rate profile visible on real Dragon docking telemetry.
+If navigation isn't valid yet, GNC coasts in translation and keeps attitude control on the star tracker and gyro. Every phase change raises one EVS event; per-cycle state goes out as a `GNC_STATE` telemetry packet.
 
-**Impulse-request control law, allocated by an RCS manager app:**
+**Aborts are a manoeuvre, not a stop.** A chaser that just cuts thrust near a station can still drift into it. On ABORT, GNC backs away, then propagates its own state with the closed-form Clohessy-Wiltshire solution every cycle to confirm the free drift stays at least 10 m clear for a full orbit before it stops thrusting.
 
-Each cycle GNC computes the velocity and rate change it wants and turns it into impulse using its model of the vehicle's mass properties:
+### Fault protection (measure → decide → act)
 
-```
-P = m·Δv  (N·s)          L = I·Δω  (N·m·s, per-axis inertia)
-```
+Flight apps only *measure* and publish counters; LC *decides* when a counter is a fault; SC *acts*. Every rule lives in a table, so it changes without touching flight code.
 
-It publishes that request. The `rcs` app works out which thrusters to fire and for how long: non-negative least squares over the thruster table, a 20 ms minimum impulse bit, and a 0.19 s per-cycle maximum with direction-preserving scaling when saturated. That's the same split real spacecraft flight software uses between guidance/control and actuator management. See [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) and [Docs/RCS_THRUSTER_REFERENCE.md](Docs/RCS_THRUSTER_REFERENCE.md).
+| Actionpoint | Fault | Response |
+|-------------|-------|----------|
+| AP0 | Sim link silent ≥ 2 s | ABORT |
+| AP1 | Accelerometer sees < 50 % of the commanded thrust for 3 cycles | HOLD |
+| AP2 | Navigation solution invalid on approach for 10 cycles | ABORT |
+| AP3 | ≥ 5 LIDAR fixes rejected in a row | HOLD |
+| AP4 | Closing faster than the approach envelope for 5 cycles | HOLD |
+| AP5 | Outside the 15° approach cone inside 20 m for 5 cycles | ABORT |
 
-**Safety features:**
+After a response fires, its actionpoint goes passive; `gnc_cmd.py rearm` arms them all again.
 
-- **Abort latch**: the system starts guidance-inhibited and requires an explicit GO command before any thrust fires. An ABORT command sets the latch and flies a collision-avoidance manoeuvre: the vehicle backs away along the docking axis until its free drift is passively safe, then coasts. Loss of the sim link for `TlmLossTimeoutSec` latches the same state automatically. Guidance stays inhibited until GO is sent again.
-- **CCSDS command dispatch**: all ground commands arrive as properly-formatted CCSDS packets (NOOP, RESET\_COUNTERS, HOLD, GO, ABORT). Unknown function codes and malformed packet lengths generate EVS error events.
-- **CFE\_TBL parameter management**: all GNC gains live in a `CFE_TBL`-managed struct (`GNC_ParamTbl_t`) rather than compiled `#define` constants. Parameters can be changed by uplink to a running cFS instance without recompile or restart. The `ProcessSimState` cycle calls `CFE_TBL_Manage` every cycle to pick up newly activated table images.
-- **LC safety monitoring**: limit-checker watchpoints on closing speed, lateral offset, and telemetry staleness fire an automatic ABORT (via the SC stored-commands app) if any threshold is exceeded.
+### Unity simulation
 
-See [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) for the full control-law channel breakdown and parameter table, or [Docs/PROJECT.md](Docs/PROJECT.md) for the phase-by-phase build history.
+Unity plays two roles: **the universe** and **the vehicle's hardware**.
 
-**Source files:**
+- **Physics:** 12,000 kg chaser with a solid-cylinder inertia model, Clohessy-Wiltshire gravity every 20 ms physics step, 16 Draco thrusters (400 N, on/off) that each produce force *and* torque.
+- **Sensors (`ChaserSensors.cs`):** reads truth from the physics engine and degrades it the way the real device would: gyro and accelerometer noise and bias, star tracker noise, LIDAR range/bearing noise with field-of-view and range limits, and a LIDAR pose solution inside 30 m. Noise is seeded so lock-stepped runs repeat exactly. Inspector toggles fail the IMU, star tracker, or LIDAR mid-run.
+- **Capture:** `DockingDetector.cs` latches when the ports are within 5 cm axially, 10 cm laterally, closing at 0–0.30 m/s, and within 10° of cone and roll. The latch reaches flight software as a mechanism switch bit.
+- **Truth stays on the Unity side.** `RelativeNav.cs` computes the exact relative state for the HUD only, so the HUD (truth) and the ground console (what flight software believes) can disagree. The gap between them is the navigation error.
 
-| File | Purpose |
-|------|---------|
-| `cFS/apps/gnc_app/fsw/src/gnc_app.c` | Main task, Init, ProcessSimState, SendHk, SelectPhase, ComputeControl, PublishCommand |
-| `cFS/apps/sim_io/fsw/src/sim_io*.c` | Device I/O app: SimLink UDP rx child task → `SIM_STATE` on SB; `THRUSTER_CMD` from SB → UDP |
-| `cFS/apps/sim_io/fsw/inc/simlink_icd.h` | SimLink wire format (mirrors `SimLinkProtocol.cs`) — see [Docs/SIMLINK_ICD.md](Docs/SIMLINK_ICD.md) |
-| `cFS/apps/gnc_app/fsw/src/gnc_app.h` | All type definitions, constants, `GNC_APP_Data_t` |
-| `cFS/apps/gnc_app/fsw/inc/gnc_app_tbl.h` | `GNC_ParamTbl_t` struct (24 gain/physical-constant fields) |
-| `cFS/apps/gnc_app/fsw/tables/gnc_param_tbl.c` | Default gain values; builds to `/cf/gnc_param_tbl.tbl` |
+The full byte layout of the Unity ⇄ cFS link (SimLink v5) is in [Docs/SIMLINK_ICD.md](Docs/SIMLINK_ICD.md). Every structure that crosses a boundary is mirrored in C, C#, and Python and size-checked at compile time.
+
+### Ground segment
+
+- **`ground_console.py`** — a browser console at http://localhost:8080 that decodes TO_LAB telemetry live: phase, range, closing speed, attitude errors, a navigation panel (filter status, sigmas, bias estimates, LIDAR accept/reject counts), an FDIR panel (each actionpoint armed/fired, fault streaks, predicted free-drift closest approach), the event log, and GO/HOLD/ABORT buttons. Every STATE packet is logged to `run_logs/` as CSV.
+- **`gnc_cmd.py`** — CCSDS command uplink:
+
+  | Command | Effect |
+  |---------|--------|
+  | `go` / `hold` / `abort` | Start or resume guidance / station-keep / collision-avoidance retreat |
+  | `rearm` | Re-arm the fault-protection actionpoints (SC RTS 4) |
+  | `nav-reset` | Re-initialise the navigation filter from the next LIDAR fix |
+  | `trace-on` / `trace-off` | Per-cycle GNC debug line in the cFS console |
+  | `noop` / `reset` | Heartbeat / zero housekeeping counters |
+
+- **`tools/fdr_decode.py`** — splits DS flight-recorder files into per-packet CSVs (GNC state, NAV solution, valve commands, housekeeping) and an events log for post-run analysis.
 
 ---
 
-### Unity Physics Simulation
+## Testing and Verification
 
-Unity 6 runs the physics and renders the scene. It applies forces and integrates dynamics; all guidance logic is in cFS.
+Testing runs in layers, from fast and narrow to slow and complete:
 
-**6-DOF dynamics:**
+1. **Compile gates.** `-std=c99 -pedantic -Wall -Werror`; `_Static_assert` on every interface struct, so a layout mismatch can't build.
+2. **NAV filter harness** (`cFS/apps/nav/unit-test/nav_filter_sim.c`). Runs `nav_filter.c` against a simulated truth model through five scenarios (long approach, close-in rotation, LIDAR dropout, teleport, star tracker outage) and reports accuracy and filter consistency.
+3. **Monte Carlo** (`cFS/apps/gnc_app/unit-test/dock_mc.c`). Flies the *unmodified* flight sources (`gnc_app.c`, `nav_filter.c`, `rcs_alloc.c`) in closed loop against a 6-DOF truth model, with dispersed start states, sensor biases, thruster thrust and alignment, and mass properties. Pass/fail is graded on capture limits, or for abort runs, on never touching the station. `-p Name=value` overrides any GNC parameter for trade studies.
+4. **End-to-end smoke test** (`tools/simlink_smoke.py`). A Python stand-in for Unity speaks SimLink to the **real cFS executable** (all apps, LC, SC, real tables) and runs 13 sequenced scenarios with automatic pass/fail: crew sticks, GO, ABORT, a corrupt frame, link loss, re-arm, and fault injection for dead thrusters, a failed IMU, a LIDAR jump, overspeed, and leaving the corridor. Every reply must echo its sequence number and pass CRC.
+5. **Flight test.** Unity + cFS + ground console, flown by hand.
 
-- Both vehicles are Unity Rigidbodies. `VehicleState.cs` computes the chaser's inertia tensor automatically each `Start()` from its mass and shape (solid-cylinder approximation — radius 2.0 m, length 6.0 m for a Dragon 2 capsule + trunk); Unity's mesh-derived inertia is not used, since it assumes uniform density which is wrong for a spacecraft with concentrated mass (heat shield, engines, batteries).
-- `ClohessyWiltshire.cs` applies a differential gravity force each `FixedUpdate`, producing the relative-motion drift a real chaser experiences at ISS orbit (mean motion n = 0.00113 rad/s). This runs whether or not cFS is connected.
-- Colliders are set to `Is Trigger = true`. Contact does not generate collision response forces; docking is detected in software by `DockingDetector.cs` monitoring range (≤0.15 m), closing speed (≤0.30 m/s), lateral offset (≤0.10 m), and attitude error (≤10°).
+**Monte Carlo results** (200 docking + 100 abort runs), before and after realism phase 5:
 
-**RCS model:**
-
-`RCSModel.cs` defines 16 physical thrusters (T00–T15) as body-frame position + direction vectors (see [Docs/RCS_THRUSTER_REFERENCE.md](Docs/RCS_THRUSTER_REFERENCE.md) for the full per-thruster table). T00–T03 are orbital retrograde thrusters, unused for docking; T04–T15 handle all approach, braking, and attitude maneuvers, each producing a coupled force **and** torque via `r × F` — a real thruster never produces "pure" translation or "pure" rotation.
-
-`RCSModel.SetThrusterOnTimes()` is the whole cFS interface. Each valve opens at the start of the GNC cycle, fires at full rated thrust (Draco thrusters don't throttle) and closes after its commanded on-time, resolved within a physics step so the delivered impulse is exact. Allocation happens in the cFS `rcs` app, using its own copy of this geometry (`rcs_thr_tbl.c`). RCSModel's **"Log cFS thruster table"** context-menu item regenerates that table after thrusters are moved.
-
-**Telemetry and commands (SimLink v2, lock-step):**
-
-`UdpTelemetrySender.cs` is the lock-step master. Every GNC cycle (0.2 s of *simulation* time) it sends a `SIM_STATE` frame to cFS, then holds that physics step until the `THRUSTER_CMD` answering it arrives. `UdpCommandReceiver.cs` applies that command in the same step. Flight software therefore runs on simulation time: runs are repeatable, and a slow frame or a paused editor never desynchronizes the two sides. If cFS doesn't answer within 500 ms, Unity drops to free-running and re-engages automatically once cFS catches up.
-
-Frames carry a sync word, version, sequence number, sim time and CRC-16. Corrupt or mismatched frames are dropped and counted, never applied. The full byte layout is in [Docs/SIMLINK_ICD.md](Docs/SIMLINK_ICD.md).
+| Metric | Before | After |
+|--------|--------|-------|
+| Capture success | 100 % | 100 % |
+| Contact lateral offset (limit 10 cm) | 5.2 cm mean, 9.2 cm worst | **1.0 cm mean, 2.3 cm worst** |
+| Propellant per docking | 19.3 kg | **11.1 kg** |
+| Aborts that stay clear of the station | **68 %** | **100 %** |
 
 ---
 
-### Ground Command Interface
+## The Realism Overhaul
 
-`gnc_cmd.py` constructs CCSDS command packets and sends them to cFS's CI\_LAB uplink port (1234/udp) from the Mac host.
+The project started with Unity doing most of the flight software's job: computing navigation from truth, choosing thrusters, raising mode flags. A design review on 2026-09-26 set out to move every one of those jobs into cFS, one phase at a time, each phase flight-tested before the next.
 
-```bash
-python3 gnc_cmd.py <command>
-```
-
-| Command | Effect |
-|---------|--------|
-| `noop` | Heartbeat; verifies the command link is alive. Increments CmdCount in HK telemetry. |
-| `reset` | Zeros HK counters (CmdCount, CmdErrCount, UdpPacketsReceived). |
-| `hold` | Freeze at current range. GNC station-keeps with no axial closure. |
-| `go` | Release a hold or the startup pre-latch. Resumes guidance from CORRECT phase. |
-| `abort` | Collision-avoidance manoeuvre: retreat until the free drift is passively safe, then coast; inhibits guidance until GO. |
-
-Every command is acknowledged by an EVS event in the cFS console. GO is rejected if guidance is already active.
+| Phase | Before | After |
+|-------|--------|-------|
+| **1 — Lock-step** | GNC ran on a wall-clock timer; plain UDP structs | Simulation time is the clock; framed, CRC-checked, sequence-numbered SimLink; `sim_io` owns the sockets |
+| **2 — Actuators** | Unity allocated thrusters; GNC sent a wrench | GNC requests an impulse; `rcs` allocates (NNLS) and pulse-modulates; Unity just opens valves; keyboard flies through cFS |
+| **3 — Fault protection** | Auto-abort hard-coded in GNC | Measure in GNC → decide in LC → act in SC; DS flight recorder; HS; ground console FDIR panel |
+| **4a — Navigation** | Unity sent range and attitude errors from truth | Unity sends raw sensor readings; `nav` estimates everything |
+| **4b — Better navigation** | Raw star tracker attitude; no bias handling | Attitude MEKF with gyro bias; accelerometer bias; LIDAR pose; NAV fault responses |
+| **5 — Guidance & control** | ABORT coasted (32 % hit the station) | Collision-avoidance manoeuvre with passive-safety check; docking-frame commands; phase-plane attitude; approach envelope; Monte Carlo-tuned gains |
 
 ---
 
@@ -173,63 +211,73 @@ Every command is acknowledged by an EVS event in the cFS console. GO is rejected
 | Tool | Purpose |
 |------|---------|
 | Docker Desktop | Runs the cFS build and runtime environment |
+| WSL 2 (Ubuntu) | Windows only: the run scripts build inside WSL for speed |
 | Unity 6 | Runs the physics simulation |
-| Python 3 | Sends ground commands |
+| Python 3 | Ground console, command uplink, and test tools (standard library only) |
 
-No external Unity packages. No other dependencies.
+No external Unity packages.
 
 ### 1. Clone with submodules
 
 ```bash
-git clone --recurse-submodules <repo-url>
+git clone --recurse-submodules https://github.com/JayyCub/cFS_Project.git
 cd cFS_Project
 ```
 
-### 2. Start the Docker container
+### 2. Build and run cFS
 
 ```bash
-./cfs-dev.sh
+./run-sim.sh
 ```
 
-This builds the image on first run (~1 minute) and drops you into a shell inside the container. The `cFS/` directory is bind-mounted at `/cfs`; edits on the host are immediately visible inside the container.
+This syncs the source into WSL, builds inside the Docker container, starts `core-cpu1`, and logs the whole run to `run_logs/`. (On macOS or Linux, run `./cfs-dev.sh`, then `make native_std.install` and `./core-cpu1` from `build-native_std/exe/cpu1`.)
 
-### 3. Build cFS (inside the container)
+Look for each app's startup event, for example:
+
+```
+SIM_IO initialized: SimLink v5, rx port 5005, ...
+NAV initialized: attitude MEKF + CW Kalman filter (IMU, star tracker, LIDAR), ...
+RCS initialized: NNLS allocation + PWM over table ...
+GNC_APP initialized (lock-step on NAV_SOLUTION). ...
+```
+
+### 3. Start the ground console
 
 ```bash
-make native_std.install
+python3 ground_console.py
 ```
 
-First build takes 2-3 minutes. Incremental rebuilds of `gnc_app` alone take a few seconds.
+Open http://localhost:8080. If no telemetry appears, press `t` to enable the TO_LAB downlink.
 
-### 4. Run cFS (inside the container)
+### 4. Start Unity
 
-```bash
-cd /build-native_std/exe/cpu1
-./core-cpu1
-```
+Open `cFS_DockingSim/` in the Unity Editor and press **Play** on **Scene2**. Wait for `lock-step ENGAGED` in the Unity console, then for the console's NAV panel to read **VALID** (a few seconds).
 
-Watch for these lines confirming `gnc_app` is healthy:
+### 5. Fly
 
-```
-GNC_APP initialized. Recv port 5005, Cmd port 5006. Guidance INHIBITED — send GO to start.
-GNC_APP UDP: listening on port 5005
-```
+Press **GO** on the console (or `python3 gnc_cmd.py go`). GNC corrects onto the axis, approaches, stops at the 20 m and 3 m hold points (press GO at each), and docks. Touching the keyboard hands control to the crew (MANUAL); GO gives it back.
 
-### 5. Start Unity
+### 6. Break something
 
-Open `cFS_DockingSim/` in the Unity Editor and press **Play** on **Scene2**. Within a second or two the cFS console switches from "waiting for Unity telemetry" to live wakeup logs showing range, phase, and commanded thruster mask.
+- Pause Unity for more than 4 s: link loss → retreat.
+- Tick **Fault injection → imuFailed** on `ChaserSensors` during approach: navigation is lost → retreat.
+- Then send `rearm` and `go`.
 
-### 6. Send GO
+For the full operations guide, events, and troubleshooting, see [Docs/OPERATIONS.md](Docs/OPERATIONS.md).
 
-In a new Mac terminal (not inside the container):
+---
 
-```bash
-python3 gnc_cmd.py go
-```
+## Documentation
 
-The GNC transitions from IDLE to CORRECT to APPROACH and autonomously docks.
-
-For the full troubleshooting guide and EVS log reference, see [Docs/OPERATIONS.md](Docs/OPERATIONS.md).
+| Document | Contents |
+|----------|----------|
+| [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) | The master guide: architecture, design patterns, every subsystem, testing, and history |
+| [Docs/OPERATIONS.md](Docs/OPERATIONS.md) | How to run it, commands, events, troubleshooting |
+| [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) | Control-law detail, parameters, and "how do I change X" recipes |
+| [Docs/SIMLINK_ICD.md](Docs/SIMLINK_ICD.md) | The Unity ⇄ cFS interface, byte by byte |
+| [Docs/RCS_THRUSTER_REFERENCE.md](Docs/RCS_THRUSTER_REFERENCE.md) | Per-thruster geometry |
+| [Docs/PROJECT.md](Docs/PROJECT.md) | Original design reference and early build history |
+| [Docs/ATTITUDE_AUTOPILOT_GUIDE.md](Docs/ATTITUDE_AUTOPILOT_GUIDE.md) | Retrospective learning guide for the original attitude controller |
 
 ---
 
@@ -237,48 +285,43 @@ For the full troubleshooting guide and EVS log reference, see [Docs/OPERATIONS.m
 
 ```
 cFS_Project/
-├── cfs-dev.sh                        ← start Docker dev container
-├── gnc_cmd.py                        ← ground command sender
-├── Dockerfile                        ← cFS build environment
-├── console.html                      ← browser-based telemetry viewer
-├── Docs/
-│   ├── PROJECT.md                    ← architecture, design reference, and phase-by-phase build history
-│   ├── OPERATIONS.md                 ← step-by-step run guide and troubleshooting
-│   ├── DEV_REFERENCE.md              ← control-law channel breakdown, parameter table, common tasks
-│   ├── RCS_THRUSTER_REFERENCE.md     ← per-thruster geometry and firing tables
-│   └── ATTITUDE_AUTOPILOT_GUIDE.md   ← retrospective learning-guide for the attitude PD implementation
+├── README.md / PROJECT_OVERVIEW.md   ← start here
+├── Docs/                             ← operations, dev reference, ICD, thruster reference
+├── run-sim.sh                        ← sync to WSL, build, and run cFS (logs to run_logs/)
+├── wsl-dev.sh / sync-to-wsl.sh       ← WSL dev container helpers
+├── cfs-dev.sh / Dockerfile           ← Docker dev container
+├── ground_console.py + console.html  ← browser ground console
+├── gnc_cmd.py                        ← command uplink
+├── tools/
+│   ├── simlink_smoke.py              ← end-to-end HIL test (Unity stand-in)
+│   └── fdr_decode.py                 ← flight-data recorder → CSV
 ├── cFS/                              ← NASA cFS (git submodule)
 │   ├── apps/
-│   │   ├── gnc_app/                  ← custom GNC flight software application
-│   │   ├── rcs/                      ← RCS manager: thruster allocation + PWM
-│   │   └── sim_io/                   ← device I/O app: the only Unity socket owner
-│   │       └── fsw/
-│   │           ├── src/              ← gnc_app.c, gnc_app.h (no sockets — SB only)
-│   │           ├── inc/              ← gnc_app_tbl.h, gnc_app_msgids.h
-│   │           └── tables/           ← gnc_param_tbl.c (default gain table)
-│   └── sample_defs/
-│       └── tables/
-│           └── sch_lab_table.c       ← 10 Hz tick; 1 Hz HK requests (GNC cycle is lock-step on SIM_STATE)
-└── cFS_DockingSim/                   ← Unity 6 project
-    └── Assets/
-        ├── VehicleState.cs           ← Rigidbody wrapper; auto-computed inertia tensor
-        ├── RCSModel.cs               ← 16 thruster valves (opens each for its cFS on-time)
-        ├── HandController.cs         ← crew hand controllers (keyboard) → cFS MANUAL flight
-        ├── ThrusterPlumes.cs         ← particle/glow exhaust effects per thruster
-        ├── ClohessyWiltshire.cs      ← orbital differential gravity
-        ├── RelativeNav.cs            ← approach state + per-axis attitude error
-        ├── DockingDetector.cs        ← contact detection
-        ├── ApproachCorridor.cs       ← 15° cone geometry and corridor check
-        ├── DockingHUD.cs             ← OnGUI operator display
-        ├── CameraManager.cs          ← switchable camera system (keys 1–4)
-        ├── RateDamping.cs            ← proportional rate-nulling controller (suppressed when cFS has authority)
-        ├── ScenarioReset.cs          ← Backspace reset
-        ├── TelemetryLogger.cs        ← 10 Hz CSV log to project root
-        ├── UdpTelemetrySender.cs     ← 10 Hz telemetry to cFS (port 5005)
-        └── UdpCommandReceiver.cs     ← valve on-time commands from cFS (port 5006)
+│   │   ├── sim_io/                   ← device I/O; simlink_icd.h is the C interface
+│   │   ├── nav/                      ← navigation; nav_filter.c + unit-test/ harness
+│   │   ├── gnc_app/                  ← guidance & control; unit-test/ Monte Carlo
+│   │   ├── rcs/                      ← thruster allocation + PWM
+│   │   └── lc, sc, ds, hs, ...       ← NASA apps
+│   └── sample_defs/                  ← app lineup, LC/SC/DS/HS and TO_LAB/SCH_LAB tables
+└── cFS_DockingSim/Assets/            ← Unity project
+    ├── SimLinkProtocol.cs            ← C# interface (mirrors simlink_icd.h)
+    ├── UdpTelemetrySender.cs         ← lock-step master
+    ├── UdpCommandReceiver.cs         ← valve-command receiver
+    ├── ChaserSensors.cs              ← sensor models
+    ├── RCSModel.cs                   ← thruster valves
+    ├── HandController.cs             ← crew hand controllers
+    ├── ClohessyWiltshire.cs          ← orbital gravity
+    ├── VehicleState.cs               ← rigid-body wrapper, inertia
+    ├── DockingDetector.cs, SoftCaptureController.cs, DockingContactConstraint.cs  ← capture
+    ├── RelativeNav.cs                ← truth (HUD only)
+    └── UI, cameras, plumes, diagnostics
 ```
 
-See [Docs/DEV_REFERENCE.md](Docs/DEV_REFERENCE.md) for the complete source file map with descriptions.
+---
+
+## What's Next
+
+**Phase 6: Unity physics realism.** Make the physical world as honest as the flight software: spring-damper contact and a real capture sequence, inertia products and centre-of-mass shift, ISS attitude motion, thruster valve dynamics and failure injection, and propellant use. Also on the list: an undocking phase (DOCKED is currently terminal) and UT-Assert unit tests for the cFS apps.
 
 ---
 
@@ -350,3 +393,7 @@ APPROACH phase, 2.99 m out, looking through the docking ring at Columbus with th
 APPROACH phase, 3.83 m out, RCS thrusters firing on final approach:
 
 ![Wide view of Dragon on approach with RCS plumes firing, new UI Toolkit HUD](Docs/Unity_Scene_Wide_8_29.png)
+
+**September 26th – October 4th: The Realism Overhaul**
+
+Up to this point, Unity was quietly doing a lot of the flight software's job: it computed navigation from perfect truth, picked which thrusters to fire, and raised the mode flags. Over five phases I moved every one of those jobs into cFS. Unity now only produces noisy sensor readings and opens valves, and the flight software has to navigate with Kalman filters, allocate its own thrusters, and protect itself with NASA's Limit Checker and Stored Command apps. Along the way I built a Python test harness that stands in for Unity against the real cFS executable, and a Monte Carlo harness that flies the flight code hundreds of times. The Monte Carlo found that 32 % of aborts drifted back into the station, so ABORT is now a real collision-avoidance manoeuvre, and 100 % of aborts stay clear. See [The Realism Overhaul](#the-realism-overhaul) and [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) for the details.

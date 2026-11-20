@@ -319,13 +319,13 @@ def _decode_evs_long(data: bytes):
         return None
 
     app_raw = data[EVS_OFF_APPNAME : EVS_OFF_APPNAME + 20]
-    app_name = app_raw.rstrip(b"\x00").decode("ascii", errors="replace")
+    app_name = app_raw.rstrip(b"\x00").decode("utf-8", errors="replace")
 
     evt_id, = struct.unpack_from("<H", data, EVS_OFF_EVENTID)
     evt_type, = struct.unpack_from("<H", data, EVS_OFF_EVTTYPE)
 
     msg_raw = data[EVS_OFF_MESSAGE : EVS_OFF_MESSAGE + 122]
-    message = msg_raw.rstrip(b"\x00").decode("ascii", errors="replace")
+    message = msg_raw.rstrip(b"\x00").decode("utf-8", errors="replace")
 
     type_str = {
         1: "DBG",
@@ -423,6 +423,9 @@ def udp_recv_thread():
                     "closing_ms": st["closing_ms"],
                     "lateral_m": st["lateral_m"],
                     "att_err_deg": [st["pitch_err_deg"], st["yaw_err_deg"], st["roll_err_deg"]],
+                    "ang_vel": [st["angvel_x"], st["angvel_y"], st["angvel_z"]],
+                    "rel_pos": [st["relpos_x"], st["relpos_y"], st["relpos_z"]],
+                    "rel_vel": [st["relvel_x"], st["relvel_y"], st["relvel_z"]],
                     "streak": st["under_delivery_streak"],
                     "overspeed": st["overspeed_streak"],
                     "corridor": st["corridor_streak"],

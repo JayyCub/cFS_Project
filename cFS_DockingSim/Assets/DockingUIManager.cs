@@ -14,6 +14,15 @@ using UnityEngine.EventSystems;
 /// </summary>
 public class DockingUIManager : MonoBehaviour
 {
+    /// <summary>
+    /// Window height, in UI units, that the HUD is laid out against. Lower = bigger HUD.
+    /// The tallest panel is about 705 units, so this has to stay above that for it to fit.
+    /// </summary>
+    public const float ReferenceHeight = 1050f;
+
+    /// <summary>Screen pixels per UI unit, for IMGUI overlays that need to match the panels.</summary>
+    public static float HudScale => Screen.height / ReferenceHeight;
+
     [Header("Data Sources")]
     public RelativeNav        nav;
     public DockingDetector    detector;
@@ -42,7 +51,14 @@ public class DockingUIManager : MonoBehaviour
     void BuildUIDocument()
     {
         var settings = ScriptableObject.CreateInstance<PanelSettings>();
-        settings.scaleMode      = PanelScaleMode.ConstantPixelSize;
+        // Scale with the window rather than using constant pixels: on a Retina display one
+        // UI pixel would otherwise be one physical pixel, which renders the HUD at half size.
+        // Matching height keeps the tall positional panel on screen at any window size.
+        settings.scaleMode      = PanelScaleMode.ScaleWithScreenSize;
+        settings.screenMatchMode = PanelScreenMatchMode.MatchWidthOrHeight;
+        settings.match           = 1f;
+        settings.referenceResolution = new Vector2Int(
+            Mathf.RoundToInt(ReferenceHeight * 16f / 9f), Mathf.RoundToInt(ReferenceHeight));
         settings.sortingOrder   = 10;
         // Without a theme, newer Unity versions refuse to render the panel at all (not just
         // missing default control skins) -- this .tss just re-imports Unity's own built-in

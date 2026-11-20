@@ -29796,8 +29796,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::UdpTelemetrySender
   nav: {fileID: 2028270415}
   chaser: {fileID: 1569440115}
-  corridor: {fileID: 2028270417}
   detector: {fileID: 2028270414}
+  sensors: {fileID: 0}
   commandReceiver: {fileID: 0}
   handController: {fileID: 0}
   targetIP: 127.0.0.1
@@ -50179,7 +50179,7 @@ Transform:
   m_GameObject: {fileID: 1569440113}
   serializedVersion: 2
   m_LocalRotation: {x: -0.12372546, y: 0.12909995, z: -0.10241309, w: 0.9785381}
-  m_LocalPosition: {x: 1.7327375, y: -4.6346154, z: -32.687862}
+  m_LocalPosition: {x: 1.7327375, y: -4.6346154, z: -40.68786}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:

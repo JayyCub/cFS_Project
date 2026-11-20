@@ -27,9 +27,15 @@ fi
 
 echo "==> Starting cFS dev container (cFS source mounted at /cfs)"
 
+# Docker refuses -t without a terminal, which is the case under run-mac.sh.
+TTY_FLAGS=""
+if [ -t 0 ]; then
+    TTY_FLAGS="-it"
+fi
+
 # MSYS_NO_PATHCONV avoids Git Bash mangling the /cfs container-side path (and
 # the /bin/bash default command) into a Windows path before docker sees it.
-MSYS_NO_PATHCONV=1 docker run --rm -it \
+MSYS_NO_PATHCONV=1 docker run --rm $TTY_FLAGS \
     --name cfs-dev \
     -v "$SCRIPT_DIR/cFS:/cfs" \
     -p 5005:5005/udp \

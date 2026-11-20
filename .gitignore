@@ -52,3 +52,11 @@ run_logs/
 # cFS_DockingSim/Assets/Models/**/*.jpg
 # cFS_DockingSim/Assets/Models/**/*.jpeg
 # cFS_DockingSim/Assets/Models/**/*.png
+
+# macOS Unity player build (run-mac.sh / build-mac.sh) — too large for GitHub
+cFS_DockingSim/SimulatorScene.app/
+cFS_DockingSim/*.app/
+
+# Python bytecode
+__pycache__/
+*.pyc

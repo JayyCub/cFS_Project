@@ -230,7 +230,9 @@ cd cFS_Project
 ./run-sim.sh
 ```
 
-This syncs the source into WSL, builds inside the Docker container, starts `core-cpu1`, and logs the whole run to `run_logs/`. (On macOS or Linux, run `./cfs-dev.sh`, then `make native_std.install` and `./core-cpu1` from `build-native_std/exe/cpu1`.)
+This syncs the source into WSL, builds inside the Docker container, starts `core-cpu1`, and logs the whole run to `run_logs/`. (On Linux, run `./cfs-dev.sh`, then `make native_std.install` and `./core-cpu1` from `build-native_std/exe/cpu1`.)
+
+**On macOS, `./run-mac.sh` replaces steps 2 to 4.** It starts cFS, the ground console and the `cFS_DockingSim/SimulatorScene.app` build in order, waiting for each to be ready, then tells you when to press GO. Build the app from Unity first. Ctrl+C or quitting the app stops everything.
 
 Look for each app's startup event, for example:
 
@@ -287,6 +289,7 @@ For the full operations guide, events, and troubleshooting, see [Docs/OPERATIONS
 cFS_Project/
 ├── README.md / PROJECT_OVERVIEW.md   ← start here
 ├── Docs/                             ← operations, dev reference, ICD, thruster reference
+├── run-mac.sh                        ← macOS: start cFS, ground console, and the Unity app in order
 ├── run-sim.sh                        ← sync to WSL, build, and run cFS (logs to run_logs/)
 ├── wsl-dev.sh / sync-to-wsl.sh       ← WSL dev container helpers
 ├── cfs-dev.sh / Dockerfile           ← Docker dev container

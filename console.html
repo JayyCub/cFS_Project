@@ -6,570 +6,1037 @@
 <title>GNC Mission Console</title>
 <style>
   :root {
-    --bg:       #0a0e14;
-    --panel:    #0f1520;
-    --border:   #1e2d45;
-    --accent:   #3a7bd5;
-    --green:    #39d353;
-    --red:      #ff4d4d;
-    --yellow:   #f0c040;
-    --cyan:     #40d0d0;
-    --gray:     #5a6a7e;
-    --text:     #c8d8e8;
-    --textdim:  #637080;
-    --mono:     "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    --canvas:   #14181c;
+    --chrome:   #1b2025;
+    --tile:     #20262c;
+    --tile-hi:  #272e35;
+    --line:     #323a42;
+    --ink:      #eef1f4;
+    --ink-2:    #a9b4bf;
+    --ink-3:    #7f8b97;
+    --accent:   #5aa9e6;
+    --spark:    #8fa3b5;
+    --green:    #6cc56a;
+    --yellow:   #f5c142;
+    --orange:   #ffa05c;
+    --red:      #ff7a6e;
+    --cyan:     #5cc8d6;
+    --purple:   #c3a0f5;
+    --gray:     #7f8b97;
+    --s1:       #3987e5;
+    --s2:       #d95926;
+    --s3:       #199e70;
+    --crit-bg:  #3a2326;
+    --crit-bd:  #7a3a38;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  [hidden] { display: none !important; }
 
   body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--mono);
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--sans);
     font-size: 13px;
     height: 100vh;
     display: grid;
-    grid-template-rows: 48px 1fr 220px;
-    grid-template-columns: 1fr;
-    gap: 0;
+    grid-template-rows: 44px minmax(0, 1fr);
     overflow: hidden;
   }
+
+  [data-sev="green"]  { --sev: var(--green); }
+  [data-sev="yellow"] { --sev: var(--yellow); }
+  [data-sev="orange"] { --sev: var(--orange); }
+  [data-sev="red"]    { --sev: var(--red); }
+  [data-sev="cyan"]   { --sev: var(--cyan); }
+  [data-sev="purple"] { --sev: var(--purple); }
+  [data-sev="gray"]   { --sev: var(--gray); }
 
   /* ── Header ── */
   header {
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    padding: 0 20px;
-    gap: 24px;
-    flex-shrink: 0;
-  }
-  header h1 {
-    font-size: 14px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    color: var(--accent);
-    text-transform: uppercase;
-  }
-  .hdr-badge {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 3px;
-    background: #1a2535;
-    color: var(--textdim);
-    border: 1px solid var(--border);
-  }
-  #conn-badge {
-    margin-left: auto;
-    font-size: 11px;
-    padding: 2px 10px;
-    border-radius: 3px;
-    background: #1a2535;
-    border: 1px solid var(--border);
-  }
-  #conn-badge.live { color: var(--green); border-color: #1e5c2a; background: #0c1f12; }
-  #conn-badge.wait { color: var(--yellow); }
-  .clock {
-    font-size: 12px;
-    color: var(--textdim);
-    margin-left: 12px;
-    min-width: 80px;
-    text-align: right;
-  }
-
-  /* ── Main grid ── */
-  .main-grid {
-    display: grid;
-    grid-template-columns: 320px 1fr 260px;
-    gap: 1px;
-    background: var(--border);
-    overflow: hidden;
-    min-height: 0;
-  }
-
-  .panel {
-    background: var(--panel);
-    overflow-y: auto;
-    padding: 14px 16px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
-
-  .panel-title {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.15em;
-    color: var(--textdim);
-    text-transform: uppercase;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 6px;
-    margin-bottom: 12px;
-  }
-
-  /* ── GNC Telemetry ── */
-  .tlm-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  .tlm-table td {
-    padding: 4px 0;
-    vertical-align: middle;
-  }
-  .tlm-table .lbl {
-    color: var(--textdim);
-    font-size: 11px;
-    width: 130px;
-  }
-  .tlm-table .val {
-    font-size: 13px;
-    font-weight: 700;
-    text-align: right;
-  }
-  .tlm-sep {
-    height: 1px;
-    background: var(--border);
-    margin: 8px 0;
-  }
-
-  .phase-badge {
-    display: inline-block;
-    font-size: 12px;
-    font-weight: 700;
-    padding: 3px 12px;
-    border-radius: 4px;
-    letter-spacing: 0.1em;
-    background: #1a2535;
-    color: var(--textdim);
-    border: 1px solid var(--border);
-  }
-  .phase-badge.IDLE     { color: var(--gray);   border-color: #2a3a4a; }
-  .phase-badge.CORRECT  { color: var(--yellow);  border-color: #5a4010; background: #1e1608; }
-  .phase-badge.APPROACH { color: var(--cyan);    border-color: #0e4a4a; background: #071515; }
-  .phase-badge.DOCKED   { color: var(--green);   border-color: #1a4a22; background: #0a1c0f; }
-  .phase-badge.HOLD     { color: #c080ff;        border-color: #4a2080; background: #160c28; }
-  .phase-badge.MANUAL   { color: #ff9a40;        border-color: #5a3010; background: #1e1006; }
-  .phase-badge.DEPART   { color: var(--red);     border-color: #5a1a1a; background: #1e0808; }
-  .fdir-row { display:flex; justify-content:space-between; font-size:11px; padding:3px 0; }
-  .fdir-row .lbl { color: var(--textdim); }
-
-  .green  { color: var(--green);  }
-  .red    { color: var(--red);    }
-  .yellow { color: var(--yellow); }
-  .cyan   { color: var(--cyan);   }
-  .gray   { color: var(--gray);   }
-
-  /* ── Status panel ── */
-  .status-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-  .stat-box {
-    background: #0a1220;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 10px 12px;
-  }
-  .stat-box .stat-lbl {
-    font-size: 10px;
-    color: var(--textdim);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 4px;
-  }
-  .stat-box .stat-val {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--text);
-  }
-  .stat-box .stat-val.alert { color: var(--red); }
-  .stat-box .stat-val.ok    { color: var(--green); }
-
-  /* gauges */
-  .gauge-row { margin: 10px 0; }
-  .gauge-lbl {
-    display: flex; justify-content: space-between;
-    font-size: 11px; color: var(--textdim); margin-bottom: 3px;
-  }
-  .gauge-lbl .gauge-val { color: var(--text); font-weight: 700; }
-  .gauge-track {
-    height: 6px;
-    background: #1a2535;
-    border-radius: 3px;
-    overflow: hidden;
-  }
-  .gauge-fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.4s ease, background 0.4s ease;
-  }
-
-  /* ── Commands panel ── */
-  .cmd-section { margin-bottom: 16px; }
-  .cmd-section-title {
-    font-size: 10px;
-    color: var(--textdim);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 8px;
-  }
-  .cmd-btn {
-    display: block;
-    width: 100%;
-    margin-bottom: 6px;
-    padding: 8px 12px;
-    background: #0f1a2a;
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-family: var(--mono);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    cursor: pointer;
-    border-radius: 3px;
-    text-align: left;
-    transition: background 0.15s, border-color 0.15s;
-  }
-  .cmd-btn:hover { background: #1a2a40; border-color: var(--accent); }
-  .cmd-btn:active { background: #0a1828; }
-  .cmd-btn.danger { border-color: #5a1010; }
-  .cmd-btn.danger:hover { background: #2a0808; border-color: var(--red); color: var(--red); }
-  .cmd-btn.safe   { border-color: #1a4a20; }
-  .cmd-btn.safe:hover   { background: #0a1c10; border-color: var(--green); color: var(--green); }
-  .cmd-btn .kbd {
-    float: right;
-    font-size: 10px;
-    color: var(--textdim);
-    background: #0a1420;
-    padding: 1px 5px;
-    border-radius: 2px;
-    border: 1px solid #2a3a4a;
-  }
-  .cmd-result {
-    font-size: 11px;
-    color: var(--textdim);
-    min-height: 16px;
-    margin-top: 4px;
-  }
-  .cmd-result.ok  { color: var(--green); }
-  .cmd-result.err { color: var(--red);   }
-
-  /* ── Event log ── */
-  .log-bar {
-    background: var(--panel);
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-  }
-  .log-header {
-    padding: 6px 16px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.15em;
-    color: var(--textdim);
-    text-transform: uppercase;
-    border-bottom: 1px solid var(--border);
+    background: var(--chrome);
+    border-bottom: 1px solid var(--line);
     display: flex;
     align-items: center;
     gap: 12px;
+    padding: 0 14px;
+  }
+  header h1 { font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .hdr-sub { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+  #conn-badge {
+    margin-left: auto;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  #conn-badge.live { color: var(--green); }
+  #conn-badge.wait { color: var(--yellow); }
+  .clock { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* ── Page frame ── */
+  .workspace {
+    display: grid;
+    grid-template-columns: 176px minmax(0, 1fr);
+    min-height: 0;
+  }
+  .content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(360px, 30vw, 520px);
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+    min-width: 0;
+  }
+  .content[data-log="semi"] { grid-template-columns: minmax(0, 1fr) 240px; }
+  .content[data-log="collapsed"] { grid-template-columns: minmax(0, 1fr) 35px; }
+
+  /* ── Command rail ── */
+  .rail {
+    background: var(--chrome);
+    border-right: 1px solid var(--line);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+  .rail-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-3);
+    margin-bottom: 5px;
+  }
+  .cmd-stack { display: grid; gap: 4px; }
+  .cmd-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .cmd-btn {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 8px;
+    background: var(--tile);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    color: var(--ink);
+    font: 600 12px var(--sans);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .cmd-btn:hover { background: var(--tile-hi); border-color: var(--accent); }
+  .cmd-btn:active { background: var(--canvas); }
+  .cmd-btn.safe { color: var(--green); }
+  .cmd-btn.safe:hover { border-color: var(--green); }
+  .cmd-btn.danger { color: var(--red); border-color: var(--crit-bd); background: var(--crit-bg); }
+  .cmd-btn.danger:hover { border-color: var(--red); }
+  .kbd { font: 500 10px var(--mono); color: var(--ink-3); }
+  .cmd-result { font-size: 11px; line-height: 1.3; color: var(--ink-3); min-height: 14px; margin-top: 5px; overflow-wrap: anywhere; }
+  .cmd-result.ok  { color: var(--green); }
+  .cmd-result.err { color: var(--red); }
+  .rail-timeline { min-height: 0; }
+  #phase-history { display: grid; gap: 3px; font-size: 11px; }
+  .tl-row { display: flex; justify-content: space-between; gap: 6px; }
+  .tl-time { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .tl-phase { font-weight: 600; color: var(--sev, var(--ink)); }
+
+  /* ── Tiles ── */
+  #tiles {
+    container-type: inline-size;
+    overflow-y: auto;
+    padding: 10px 12px;
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+  .section + .section { margin-top: 10px; }
+  .section-title { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 5px; }
+  .row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+    gap: 6px;
+  }
+  .row + .row { margin-top: 6px; }
+  .row.hero-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .row.chart-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .row.flag-row { grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); }
+
+  .tile {
+    background: var(--tile);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 6px 9px 7px;
+    min-width: 0;
+    min-height: 66px;
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+  }
+  .tile:hover { background: var(--tile-hi); }
+  .tile:focus-visible, .cmd-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .tile[data-sev="red"] { background: var(--crit-bg); border-color: var(--crit-bd); }
+  .tile.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .tile-head { display: flex; justify-content: space-between; gap: 6px; }
+  .tile-label {
+    font-size: 11px;
+    color: var(--ink-2);
+    line-height: 14px;
+  }
+  .tile-glyph { font-size: 10px; line-height: 14px; color: var(--sev); flex-shrink: 0; }
+  .tile-value {
+    margin-top: auto;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    color: var(--sev, var(--ink));
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .tile-v { font-size: 21px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; }
+  .tile-u { font-size: 11px; color: var(--ink-3); }
+  .tile.wordy .tile-value { white-space: normal; }
+  .tile.wordy .tile-v { font-size: 13px; line-height: 1.25; }
+  .tile.hero { min-height: 158px; padding: 8px 11px 9px; }
+  .tile.hero .tile-label { font-size: 12px; }
+  .tile.hero .tile-value { margin-top: 4px; }
+  .tile.hero .tile-v { font-size: 30px; }
+  .tile.hero.wordy .tile-value { margin: auto 0; }
+  .tile.hero.wordy .tile-v { font-size: 28px; }
+  .tile.hero .tile-sub { font-size: 11px; line-height: 14px; }
+  .tile-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+  .tile.hero.wordy .tile-stats { grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; }
+  .tile-stats em { display: block; font-style: normal; font-size: 10px; line-height: 12px; color: var(--ink-3); }
+  .tile-stats b { display: block; font-size: 12px; line-height: 15px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .tile-sub { font-size: 10px; color: var(--ink-3); line-height: 13px; }
+  .tile-spark { display: block; width: 100%; flex: 1 1 34px; min-height: 34px; margin-top: 4px; }
+  .tile-spark polyline { fill: none; stroke: var(--spark); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+  .tile-bar { position: relative; height: 5px; margin-top: 7px; background: var(--canvas); border-radius: 2px; }
+  .tile-bar i { display: block; height: 100%; width: 0; background: var(--sev); border-radius: 2px; transition: width .2s linear; }
+  .tile-bar b { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--ink-2); }
+
+  .tile.flag { flex-direction: row; align-items: center; gap: 8px; min-height: 34px; padding: 5px 9px; }
+  .tile.flag .tile-head { flex: 1; }
+  .tile.flag .tile-value { margin-top: 0; }
+  .tile.flag .tile-v { font-size: 11px; line-height: 14px; }
+  .tile.flag .tile-glyph, .tile.flag .tile-u, .tile.flag .tile-sub { display: none; }
+
+  /* ── Charts ── */
+  .tile.chart-tile { min-height: 186px; padding: 8px 11px 6px; }
+  .tile.chart-tile .tile-label { font-size: 12px; }
+  .chart-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 2px 12px; min-height: 16px; margin-top: 2px; font-size: 11px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .chart-legend .lg { display: inline-flex; align-items: center; gap: 4px; }
+  .chart-legend .lg i { width: 12px; height: 2px; border-radius: 1px; }
+  .chart-legend .lg b { color: var(--ink); font-weight: 600; }
+  .chart-legend .at { margin-left: auto; color: var(--ink-3); }
+  .chart-svg { display: block; width: 100%; flex: 1 1 130px; min-height: 130px; margin-top: 3px; }
+  .chart-svg line.grid { stroke: var(--line); stroke-width: 1; }
+  .chart-svg line.zero { stroke: var(--ink-3); stroke-width: 1; }
+  .chart-svg line.limit { stroke-width: 1; stroke-dasharray: 4 3; }
+  .chart-svg line.cross { stroke: var(--ink-2); stroke-width: 1; }
+  .chart-svg polyline { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .chart-svg text { font-size: 10px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+  /* ── Detail window ── */
+  #detail {
+    margin: auto;
+    width: min(1000px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    background: var(--chrome);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .6);
+  }
+  #detail::backdrop { background: rgba(6, 8, 10, .72); }
+  .detail-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .detail-head h2 { font-size: 16px; font-weight: 600; }
+  .detail-close { width: 28px; height: 28px; background: none; border: 1px solid var(--line); border-radius: 3px; color: var(--ink-2); font-size: 13px; cursor: pointer; }
+  .detail-close:hover { border-color: var(--accent); color: var(--ink); }
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 250px; }
+  .detail-main { padding: 12px 14px 14px; min-width: 0; }
+  .detail-info { padding: 12px 14px; border-left: 1px solid var(--line); }
+  .detail-lbl { font-size: 11px; font-weight: 600; color: var(--ink-3); margin: 12px 0 3px; }
+  .detail-info > .detail-lbl:first-child { margin-top: 0; }
+  .detail-info p { font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+  .detail-now { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+  #detail-v { font-size: 34px; font-weight: 600; line-height: 1.15; color: var(--sev, var(--ink)); }
+  #detail-u { font-size: 13px; color: var(--ink-3); }
+  #detail-sub { font-size: 12px; color: var(--ink-3); margin-left: 8px; }
+  .detail-ranges { display: flex; gap: 4px; margin: 10px 0 6px; }
+  .detail-ranges button { padding: 3px 10px; background: var(--tile); border: 1px solid var(--line); border-radius: 3px; color: var(--ink-2); font: 500 11px var(--sans); cursor: pointer; }
+  .detail-ranges button:hover { border-color: var(--accent); }
+  .detail-ranges button[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); background: var(--tile-hi); }
+  #detail-chart .chart-svg { flex: none; height: 290px; }
+  .detail-empty { font-size: 12px; color: var(--ink-3); padding: 14px 0 4px; }
+  .detail-scroll { max-height: 260px; overflow-y: auto; margin-top: 10px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+  .detail-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .detail-table th { text-align: right; font-size: 11px; font-weight: 600; color: var(--ink-3); padding: 3px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--chrome); }
+  .detail-table td { text-align: right; padding: 3px 8px; border-bottom: 1px solid #262c32; color: var(--sev, var(--ink-2)); }
+  .detail-table th:first-child, .detail-table td:first-child { text-align: left; }
+
+  /* ── Event log ── */
+  .log {
+    background: var(--chrome);
+    border-left: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .log-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px 5px 12px;   /* right and top match the collapsed strip: the view button stays put */
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-2);
+  }
+  #log-count { font-size: 11px; font-weight: 400; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  #log-mode-btn {
+    width: 22px;
+    height: 22px;
     flex-shrink: 0;
+    background: var(--tile);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    color: var(--ink);
+    font: 600 14px/1 var(--sans);
+    cursor: pointer;
   }
-  #log-count {
-    background: #1a2535;
-    color: var(--textdim);
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-  }
+  #log-mode-btn:hover { border-color: var(--accent); }
+  #log-mode-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .log-title { white-space: nowrap; }
   #log-clear-btn {
     margin-left: auto;
-    font-size: 10px;
+    font: 500 11px var(--sans);
     background: none;
-    border: 1px solid var(--border);
-    color: var(--textdim);
-    padding: 2px 8px;
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    padding: 1px 8px;
     border-radius: 3px;
     cursor: pointer;
-    font-family: var(--mono);
   }
-  #log-clear-btn:hover { border-color: var(--accent); color: var(--text); }
-  #event-log {
-    flex: 1;
-    overflow-y: auto;
-    padding: 4px 0;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
-  .log-entry {
+  #log-clear-btn:hover { border-color: var(--accent); color: var(--ink); }
+  .log-cols, .log-entry {
     display: grid;
-    grid-template-columns: 70px 60px 90px 1fr;
-    padding: 3px 16px;
-    border-bottom: 1px solid #0d1520;
-    font-size: 11px;
-    line-height: 1.4;
+    grid-template-columns: 62px 56px 76px minmax(0, 1fr);
+    padding: 2px 12px;
   }
-  .log-entry:hover { background: #111a28; }
-  .log-ts   { color: var(--textdim); }
+  .content[data-log="semi"] .log-cols, .content[data-log="semi"] .log-entry { grid-template-columns: 62px 56px minmax(0, 1fr); }
+  .content[data-log="semi"] .log-msg, .content[data-log="semi"] .log-cols span:nth-child(4) { display: none; }
+  .content[data-log="collapsed"] .log-cols, .content[data-log="collapsed"] #event-log, .content[data-log="collapsed"] #log-clear-btn { display: none; }
+  @media (min-width: 861px) {
+    .content[data-log="collapsed"] .log-header { flex-direction: column; padding: 5px 0; }
+    .content[data-log="collapsed"] .log-title { writing-mode: vertical-rl; }
+    .content[data-log="collapsed"] #log-mode-btn { order: -1; }
+  }
+  .log-cols { font-size: 11px; font-weight: 600; color: var(--ink-3); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  #event-log { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+  .log-entry { font: 11px/1.45 var(--mono); border-bottom: 1px solid #262c32; }
+  .log-entry:hover { background: var(--tile); }
+  .log-ts   { color: var(--ink-3); }
   .log-type { font-weight: 700; }
-  .log-type.INF  { color: var(--cyan);   }
-  .log-type.ERR  { color: var(--red);    }
-  .log-type.CRIT { color: #ff8040;       }
-  .log-type.DBG  { color: var(--textdim);}
-  .log-app  { color: var(--accent); }
-  .log-msg  { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .log-msg.CRIT { color: #ff8040; font-weight: 700; }
+  .log-type.INF  { color: var(--cyan); }
+  .log-type.ERR  { color: var(--red); }
+  .log-type.CRIT { color: var(--orange); }
+  .log-type.DBG  { color: var(--ink-3); }
+  .log-app  { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 6px; }
+  .log-msg  { color: var(--ink); overflow-wrap: anywhere; }
+  .log-msg.CRIT { color: var(--orange); font-weight: 700; }
+
+  /* ── Tooltip ── */
+  #tip {
+    position: fixed;
+    z-index: 20;
+    max-width: 290px;
+    padding: 8px 10px;
+    background: #0d1013;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .5);
+    font-size: 12px;
+    line-height: 1.4;
+    pointer-events: none;
+  }
+  #tip[hidden] { display: none; }
+  .tip-title { font-weight: 600; margin-bottom: 3px; }
+  .tip-plain { color: var(--ink); margin-bottom: 5px; }
+  .tip-body { color: var(--ink-2); }
+  .tip-meta { color: var(--ink-3); font-size: 11px; margin-top: 5px; }
+  .tip-hint { color: var(--accent); font-size: 11px; margin-top: 6px; }
+
+  /* Sized by the room the boxes get, which changes as the log opens and closes. */
+  @container (max-width: 1000px) {
+    .row.flag-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+  @container (max-width: 760px) {
+    .row.hero-row, .row.chart-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 720px) {
+    .detail-grid { grid-template-columns: minmax(0, 1fr); }
+    .detail-info { border-left: 0; border-top: 1px solid var(--line); }
+  }
+  @container (max-width: 520px) {
+    .row.chart-row { grid-template-columns: minmax(0, 1fr); }
+    .row.flag-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  /* ── Narrow windows: commands become a strip, the page scrolls ── */
+  @media (max-width: 860px) {
+    body { display: block; height: auto; min-height: 100vh; overflow: auto; }
+    header { height: 44px; }
+    .workspace, .content { display: block; }
+    .rail {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      flex-direction: row;
+      flex-wrap: wrap;
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+      overflow: visible;
+    }
+    .rail > div { flex: 1 1 150px; }
+    .rail-timeline { display: none; }
+    #tiles { overflow: visible; }
+    .log { height: 280px; border-left: 0; border-top: 1px solid var(--line); }
+    .content[data-log="collapsed"] .log { height: auto; }
+  }
+  @media (max-width: 480px) {
+    .hdr-sub { display: none; }
+    .log-cols { display: none; }
+    .log-entry { grid-template-columns: auto auto minmax(0, 1fr); column-gap: 8px; }
+    .log-msg { grid-column: 1 / -1; white-space: normal; }
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>&#9632; GNC Mission Console</h1>
-  <span class="hdr-badge">cFS / Docking Simulator</span>
-  <span id="conn-badge" class="wait">&#9679; WAITING</span>
+  <h1>GNC Mission Console</h1>
+  <span class="hdr-sub">cFS / Docking Simulator</span>
+  <span id="conn-badge" class="wait">&#9675; WAITING</span>
   <span class="clock" id="clock"></span>
 </header>
 
-<div class="main-grid">
+<div class="workspace">
 
-  <!-- ── GNC Telemetry ── -->
-  <div class="panel">
-    <div class="panel-title">GNC Telemetry</div>
-
-    <div style="margin-bottom:12px;">
-      <div style="font-size:10px;color:var(--textdim);margin-bottom:5px;">PHASE</div>
-      <span class="phase-badge" id="phase-badge">---</span>
+  <aside class="rail">
+    <div>
+      <div class="rail-title">Guidance</div>
+      <div class="cmd-stack">
+        <button class="cmd-btn safe" title="GO: start or resume guidance" onclick="sendCmd('gnc_go')">&#9654; GO <span class="kbd">G</span></button>
+        <button class="cmd-btn" title="HOLD" onclick="sendCmd('gnc_hold')">&#10073;&#10073; HOLD <span class="kbd">H</span></button>
+        <button class="cmd-btn danger" title="ABORT" onclick="sendCmd('gnc_abort')">&#9888; ABORT <span class="kbd">A</span></button>
+      </div>
+      <div id="cmd-result" class="cmd-result"></div>
     </div>
 
-    <table class="tlm-table">
-      <tr>
-        <td class="lbl">Range</td>
-        <td class="val" id="t-range">--- m</td>
-      </tr>
-      <tr>
-        <td class="lbl">Closing Speed</td>
-        <td class="val" id="t-closing">--- m/s</td>
-      </tr>
-      <tr>
-        <td class="lbl">Lateral Offset</td>
-        <td class="val" id="t-lateral">--- m</td>
-      </tr>
-      <tr>
-        <td class="lbl">Att Err P/Y/R</td>
-        <td class="val" id="t-att">--- °</td>
-      </tr>
-      <tr>
-        <td class="lbl">Flags</td>
-        <td class="val gray" id="t-flags" style="font-size:10px;">---</td>
-      </tr>
-    </table>
-
-    <div class="tlm-sep"></div>
-
-    <div class="gauge-row">
-      <div class="gauge-lbl">
-        <span>Closing Speed</span>
-        <span class="gauge-val" id="g-closing-val">---</span>
-      </div>
-      <div class="gauge-track">
-        <div class="gauge-fill" id="g-closing" style="width:0%;background:var(--gray);"></div>
+    <div>
+      <div class="rail-title">System</div>
+      <div class="cmd-pair">
+        <button class="cmd-btn" title="No-op: confirms the command path works" onclick="sendCmd('gnc_noop')">NOOP <span class="kbd">N</span></button>
+        <button class="cmd-btn" title="Reset GNC_APP counters" onclick="sendCmd('gnc_reset')">RESET <span class="kbd">R</span></button>
+        <button class="cmd-btn" title="Re-arm FDIR: SC RTS 4 sets every LC actionpoint ACTIVE again" onclick="sendCmd('fdir_rearm')">FDIR <span class="kbd">F</span></button>
+        <button class="cmd-btn" title="Enable TO_LAB telemetry output to this console" onclick="sendToEnable()">TLM <span class="kbd">T</span></button>
       </div>
     </div>
 
-    <div class="gauge-row">
-      <div class="gauge-lbl">
-        <span>Lateral Offset</span>
-        <span class="gauge-val" id="g-lateral-val">---</span>
-      </div>
-      <div class="gauge-track">
-        <div class="gauge-fill" id="g-lateral" style="width:0%;background:var(--gray);"></div>
-      </div>
+    <div class="rail-timeline">
+      <div class="rail-title">Phase Timeline</div>
+      <div id="phase-history"></div>
     </div>
+  </aside>
 
-    <div class="tlm-sep"></div>
+  <div class="content">
+    <main id="tiles"></main>
 
-    <table class="tlm-table">
-      <tr>
-        <td class="lbl">Cycle Count</td>
-        <td class="val gray" id="t-wakeup">---</td>
-      </tr>
-      <tr>
-        <td class="lbl">Cmd Count</td>
-        <td class="val gray" id="t-cmd-cnt">---</td>
-      </tr>
-      <tr>
-        <td class="lbl">Cmd Err Count</td>
-        <td class="val" id="t-cmd-err">---</td>
-      </tr>
-      <tr>
-        <td class="lbl">SIM_STATEs Rx</td>
-        <td class="val gray" id="t-udp-pkts">---</td>
-      </tr>
-      <tr>
-        <td class="lbl">Tlm Stale (s)</td>
-        <td class="val" id="t-stale">---</td>
-      </tr>
-      <tr>
-        <td class="lbl">Last Packet</td>
-        <td class="val gray" id="t-last-rx" style="font-size:11px;">---</td>
-      </tr>
-    </table>
+    <section class="log">
+      <div class="log-header">
+        <span class="log-title">EVS Event Log</span>
+        <span id="log-count">0</span>
+        <button id="log-clear-btn" onclick="clearLog()">Clear</button>
+        <button id="log-mode-btn" onclick="cycleLogMode()"></button>
+      </div>
+      <div class="log-cols"><span>Time</span><span>Severity</span><span>App</span><span>Message</span></div>
+      <div id="event-log"></div>
+    </section>
   </div>
-
-  <!-- ── Mission Status ── -->
-  <div class="panel">
-    <div class="panel-title">Mission Status</div>
-
-    <div class="status-grid">
-      <div class="stat-box">
-        <div class="stat-lbl">Phase</div>
-        <div class="stat-val" id="s-phase">---</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-lbl">Cmd Errors</div>
-        <div class="stat-val" id="s-cmd-err">0</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-lbl">SIM_STATE Rx</div>
-        <div class="stat-val" id="s-udp">0</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-lbl">Stale (s)</div>
-        <div class="stat-val" id="s-stale">0</div>
-      </div>
-    </div>
-
-    <div class="tlm-sep" style="margin-top:14px;"></div>
-
-    <div style="margin-top:10px;">
-      <div class="panel-title" style="margin-bottom:8px;">Approach Corridor</div>
-      <div class="gauge-row">
-        <div class="gauge-lbl">
-          <span>Lateral / 0.50 m gate</span>
-          <span class="gauge-val" id="corr-pct-val">--- %</span>
-        </div>
-        <div class="gauge-track" style="height:10px;">
-          <div class="gauge-fill" id="corr-gauge" style="width:0%;background:var(--green);"></div>
-        </div>
-      </div>
-      <div style="margin-top:6px;font-size:11px;color:var(--textdim);">
-        Closing limit 0.30 m/s:
-        <span id="closing-limit" style="font-weight:700;margin-left:4px;">---</span>
-      </div>
-    </div>
-
-    <div class="tlm-sep" style="margin-top:14px;"></div>
-
-    <div style="margin-top:10px;">
-      <div class="panel-title" style="margin-bottom:8px;">FDIR (LC → SC)</div>
-      <div class="fdir-row"><span class="lbl">LC state</span><span id="fdir-lc">---</span></div>
-      <div id="fdir-aps"></div>
-      <div class="fdir-row"><span class="lbl">Axial under-delivery streak</span><span id="fdir-streak">---</span></div>
-      <div class="fdir-row"><span class="lbl">Overspeed / corridor streak</span><span id="fdir-env">---</span></div>
-      <div class="fdir-row"><span class="lbl">Free drift: closest approach</span><span id="fdir-drift">---</span></div>
-      <div class="fdir-row"><span class="lbl">Abort retreat Δv</span><span id="fdir-cam">---</span></div>
-    </div>
-
-    <div class="tlm-sep" style="margin-top:14px;"></div>
-
-    <div style="margin-top:10px;">
-      <div class="panel-title" style="margin-bottom:8px;">NAV (sensors → filter)</div>
-      <div class="fdir-row"><span class="lbl">Relative nav</span><span id="nav-rel">---</span></div>
-      <div class="fdir-row"><span class="lbl">Attitude</span><span id="nav-att">---</span></div>
-      <div class="fdir-row"><span class="lbl">σ attitude</span><span id="nav-att-sigma">---</span></div>
-      <div class="fdir-row"><span class="lbl">Gyro bias est. (°/h)</span><span id="nav-gbias">---</span></div>
-      <div class="fdir-row"><span class="lbl">Accel bias est. (µg)</span><span id="nav-abias">---</span></div>
-      <div class="fdir-row"><span class="lbl">σ position / velocity</span><span id="nav-sigma">---</span></div>
-      <div class="fdir-row"><span class="lbl">LIDAR used / rejected / no fix</span><span id="nav-rps">---</span></div>
-      <div class="fdir-row"><span class="lbl">Last innovation</span><span id="nav-innov">---</span></div>
-      <div class="fdir-row"><span class="lbl">Filter inits / bad readings</span><span id="nav-inits">---</span></div>
-    </div>
-
-    <div class="tlm-sep" style="margin-top:14px;"></div>
-
-    <div style="margin-top:10px;">
-      <div class="panel-title" style="margin-bottom:8px;">Phase Timeline</div>
-      <div id="phase-history" style="font-size:11px;color:var(--textdim);line-height:1.8;"></div>
-    </div>
-  </div>
-
-  <!-- ── Commands ── -->
-  <div class="panel">
-    <div class="panel-title">Ground Commands</div>
-
-    <div class="cmd-section">
-      <div class="cmd-section-title">GNC App</div>
-      <button class="cmd-btn" onclick="sendCmd('gnc_noop')">
-        NOOP
-        <span class="kbd">N</span>
-      </button>
-      <button class="cmd-btn" onclick="sendCmd('gnc_reset')">
-        RESET COUNTERS
-        <span class="kbd">R</span>
-      </button>
-    </div>
-
-    <div class="cmd-section">
-      <div class="cmd-section-title">Guidance Control</div>
-      <button class="cmd-btn safe" onclick="sendCmd('gnc_go')">
-        &#9654; GO / RESUME
-        <span class="kbd">G</span>
-      </button>
-      <button class="cmd-btn" onclick="sendCmd('gnc_hold')">
-        &#9646;&#9646; HOLD
-        <span class="kbd">H</span>
-      </button>
-      <button class="cmd-btn danger" onclick="sendCmd('gnc_abort')">
-        &#9888; ABORT
-        <span class="kbd">A</span>
-      </button>
-    </div>
-
-    <div class="cmd-section">
-      <div class="cmd-section-title">FDIR</div>
-      <button class="cmd-btn" onclick="sendCmd('fdir_rearm')" title="SC RTS 4: set every LC actionpoint ACTIVE again">
-        RE-ARM FDIR (RTS 4)
-        <span class="kbd">F</span>
-      </button>
-    </div>
-
-    <div id="cmd-result" class="cmd-result"></div>
-
-    <div class="tlm-sep"></div>
-
-    <div class="cmd-section" style="margin-top:12px;">
-      <div class="cmd-section-title">Console</div>
-      <button class="cmd-btn" onclick="sendToEnable()">
-        Enable TO_LAB TLM
-        <span class="kbd">T</span>
-      </button>
-    </div>
-  </div>
-
 </div>
 
-<!-- ── Event Log ── -->
-<div class="log-bar">
-  <div class="log-header">
-    EVS Event Log
-    <span id="log-count">0</span>
-    <button id="log-clear-btn" onclick="clearLog()">CLEAR</button>
+<div id="tip" role="tooltip" hidden></div>
+
+<dialog id="detail" aria-labelledby="detail-title">
+  <div class="detail-head">
+    <h2 id="detail-title"></h2>
+    <button class="detail-close" aria-label="Close">&#10005;</button>
   </div>
-  <div id="event-log"></div>
-</div>
+  <div class="detail-grid">
+    <div class="detail-main">
+      <div class="detail-now" id="detail-now">
+        <span id="detail-v"></span><span id="detail-u"></span><span id="detail-sub"></span>
+      </div>
+      <div class="detail-ranges" id="detail-ranges">
+        <button data-win="30">30 s</button>
+        <button data-win="60">1 min</button>
+        <button data-win="300">5 min</button>
+        <button data-win="all">All</button>
+      </div>
+      <div id="detail-chart"></div>
+      <div class="detail-scroll">
+        <table class="detail-table"><thead id="detail-thead"></thead><tbody id="detail-tbody"></tbody></table>
+      </div>
+    </div>
+    <aside class="detail-info">
+      <div class="detail-lbl">In plain terms</div>
+      <p id="detail-plain"></p>
+      <div class="detail-lbl">Technical detail</div>
+      <p id="detail-desc"></p>
+      <div id="detail-colors">
+        <div class="detail-lbl">What the colors mean</div>
+        <p id="detail-th"></p>
+      </div>
+      <div class="detail-lbl">Source</div>
+      <p id="detail-src"></p>
+    </aside>
+  </div>
+</dialog>
 
 <script>
+// ---------------------------------------------------------------------------
+// Dashboard definition: add a box by adding an entry here and setting it in
+// updateGnc(). `tip` is what shows on click: d = technical description,
+// src = packet, th = what the colors mean. Plain-English text is in PLAIN.
+// ---------------------------------------------------------------------------
+const STATE = 'GNC STATE packet, every GNC cycle';
+const HK    = 'GNC HK packet, 1 Hz';
+const LC    = 'LC HK packet';
+const NAV   = 'NAV HK packet, 1 Hz';
+
+const FLAGS = [
+  ['LINK_UP', 'Link Up', 'At least one SIM_STATE has been received since start.'],
+  ['IN_CORRIDOR', 'In Corridor', 'The NAV port offset is inside the approach cone.'],
+  ['HOLDPT1_ARMED', 'Hold Pt 1 Armed', 'The outer autonomous hold point has not been reached yet.'],
+  ['HOLDPT2_ARMED', 'Hold Pt 2 Armed', 'The inner autonomous hold point has not been reached yet.'],
+  ['CONTACT', 'Contact', 'Capture latches are engaged (mechanism switch).'],
+  ['ABORT_LATCH', 'Abort Latch', 'ABORT is latched: guidance is inhibited until GO.'],
+  ['BAD_CTRL', 'Bad Control', 'The last control output was non-finite, so the vehicle is coasting.'],
+  ['NAV_INVALID', 'NAV Invalid', 'The NAV relative solution is unusable, so translation coasts.'],
+];
+const BAD_FLAGS = new Set(['ABORT_LATCH', 'BAD_CTRL', 'NAV_INVALID']);
+
+// Series are [sample key, legend label, color slot]. Each entity keeps one color
+// across charts. Axial and lateral are separate charts because tens of meters
+// on Z would flatten sub-meter X/Y on a shared axis.
+const NAV_POS = 'NAV RelPos: chaser CoM minus target reference, LVLH (+Y radial). The chaser closes from −Z.';
+const NAV_VEL = 'NAV relative velocity, LVLH (+Y radial).';
+const CHARTS = [
+  { id: 'c_att', label: 'Attitude Error', unit: '°', dec: 2, minSpan: 2,
+    series: [['pitch', 'Pitch', 1], ['yaw', 'Yaw', 2], ['roll', 'Roll', 3]],
+    tip: { d: 'NAV quaternion attitude error about body X/Y/Z (pitch/yaw/roll).', src: STATE } },
+  { id: 'c_pz', label: 'Axial Position (Z)', unit: 'm', dec: 2, minSpan: 1,
+    series: [['pz', 'Z', 3]], tip: { d: NAV_POS, src: STATE } },
+  { id: 'c_vz', label: 'Axial Velocity (Z)', unit: 'm/s', dec: 3, minSpan: 0.05,
+    series: [['vz', 'Z', 3]], tip: { d: NAV_VEL, src: STATE } },
+  { id: 'c_rate', label: 'Attitude Rate', unit: '°/s', dec: 3, minSpan: 0.5,
+    series: [['wx', 'Pitch', 1], ['wy', 'Yaw', 2], ['wz', 'Roll', 3]],
+    tip: { d: 'Gyro body rates about X/Y/Z (pitch/yaw/roll), converted to degrees per second.', src: STATE } },
+  { id: 'c_lat', label: 'Lateral Position (X, Y)', unit: 'm', dec: 3, minSpan: 0.2,
+    series: [['px', 'X', 1], ['py', 'Y', 2]], tip: { d: NAV_POS, src: STATE } },
+  { id: 'c_vlat', label: 'Lateral Velocity (X, Y)', unit: 'm/s', dec: 3, minSpan: 0.02,
+    series: [['vx', 'X', 1], ['vy', 'Y', 2]], tip: { d: NAV_VEL, src: STATE } },
+];
+
+const LAYOUT = [
+  { title: 'Approach', rows: [
+    [
+      { id: 'phase', label: 'Phase', hero: true, wordy: true, glyph: false, stats: ['In Phase', 'Previous', 'Changes'],
+        tip: { d: 'Guidance phase in effect for this cycle.', src: STATE } },
+      { id: 'range', label: 'Range', unit: 'm', hero: true, trend: true, dec: 2,
+        tip: { d: 'NAV distance, docking port to docking port.', src: STATE } },
+      { id: 'closing', label: 'Closing Speed', unit: 'm/s', hero: true, trend: true, dec: 3, bar: 0.30 / 0.35 * 100,
+        limits: [{ v: 0.30, sev: 'red' }],
+        tip: { d: 'Rate the range is shrinking; positive means closing. Bar spans 0 to 0.35 m/s; the tick marks the 0.30 m/s limit.', src: STATE,
+               th: 'Green: closing within the limit. Red: over 0.30 m/s. Gray: not closing.' } },
+      { id: 'lateral', label: 'Lateral Offset', unit: 'm', hero: true, trend: true, dec: 3, bar: 50,
+        limits: [{ v: 0.10, sev: 'yellow' }, { v: 0.50, sev: 'red' }],
+        tip: { d: 'Docking port offset from the centerline. Bar spans 0 to 1 m; the tick marks the 0.50 m gate.', src: STATE,
+               th: 'Green: up to 0.10 m. Yellow: up to 0.50 m. Red: beyond 0.50 m.' } },
+      { id: 'corridor', label: 'Corridor Used', unit: '%', hero: true, trend: true, dec: 0, bar: 100,
+        limits: [{ v: 100, sev: 'red' }],
+        tip: { d: 'Lateral offset as a percentage of the 0.50 m approach gate.', src: STATE,
+               th: 'Green: inside the gate. Red: at or past it.' } },
+      { id: 'pitch', label: 'Pitch Error', unit: '°', hero: true, trend: true, dec: 1, limits: attLimits(), tip: attTip('Pitch') },
+      { id: 'yaw',   label: 'Yaw Error',   unit: '°', hero: true, trend: true, dec: 1, limits: attLimits(), tip: attTip('Yaw') },
+      { id: 'roll',  label: 'Roll Error',  unit: '°', hero: true, trend: true, dec: 1, limits: attLimits(), tip: attTip('Roll') },
+    ],
+    FLAGS.map(([flag, label, d]) => ({
+      id: 'flag_' + flag, label, flag: true, glyph: false,
+      tip: { d, src: STATE, th: BAD_FLAGS.has(flag) ? 'Red when set.' : 'Green when set.' },
+    })),
+  ]},
+  { title: 'Attitude, Position & Velocity', charts: CHARTS, rows: [] },
+  { title: 'Link & Commanding', rows: [
+    [
+      { id: 'stale', label: 'Telemetry Stale', unit: 's', limits: [{ v: 2, sev: 'yellow' }, { v: 5, sev: 'red' }],
+        tip: { d: 'Consecutive 1 Hz HK periods with no SIM_STATE, counted once the link has been up. Input to the link-loss abort.', src: HK, th: 'Green: under 2 s. Yellow: 2 s or more. Red: 5 s or more.' } },
+      { id: 'lastrx', label: 'Last Packet', tip: { d: 'Ground receive time of the latest GNC packet.', src: 'Ground console clock' } },
+      { id: 'udp', label: 'SIM_STATE Rx', tip: { d: 'SIM_STATE messages GNC has received.', src: HK } },
+      { id: 'cycles', label: 'GNC Cycles', tip: { d: 'Lock-step control cycles run (SIM_STATEs accepted).', src: HK } },
+      { id: 'cmdcnt', label: 'Cmds Accepted', tip: { d: 'Commands accepted by GNC_APP.', src: HK } },
+      { id: 'cmderr', label: 'Cmd Errors', tip: { d: 'Commands rejected by GNC_APP.', src: HK, th: 'Red: any errors.' } },
+    ],
+  ]},
+  { title: 'FDIR', id: 'fdir', rows: [
+    [
+      { id: 'lc', label: 'LC State', wordy: true, tip: { d: 'Limit Checker application state.', src: LC, th: 'Green: ACTIVE. Yellow: any other state.' } },
+      { id: 'streak', label: 'Axial Under-Delivery', unit: 'cycles', limits: [{ v: 3, sev: 'red' }],
+        tip: { d: 'Consecutive cycles the axial burn delivered under 50% of the predicted Δv.', src: STATE, th: 'Yellow: above 0. Red: 3 or more.' } },
+      { id: 'overspeed', label: 'Overspeed Streak', unit: 'cycles', limits: [{ v: 5, sev: 'red' }],
+        tip: { d: 'Cycles above the approach envelope. LC responds with HOLD.', src: STATE, th: 'Yellow: above 0. Red: 5 or more.' } },
+      { id: 'corrstreak', label: 'Corridor Streak', unit: 'cycles', limits: [{ v: 5, sev: 'red' }],
+        tip: { d: 'Cycles outside the cone inside the corridor check range. LC responds with ABORT.', src: STATE, th: 'Yellow: above 0. Red: 5 or more.' } },
+      { id: 'drift', label: 'Free-Drift Closest', unit: 'm', limits: [{ v: 10, sev: 'yellow' }],
+        tip: { d: 'Closest the port would come to the target port in free drift (CW prediction; 0 if NAV is invalid, shown as ---).', src: STATE, th: 'Green: 10 m or more. Yellow: under 10 m.' } },
+      { id: 'cam', label: 'Abort Retreat Δv', unit: 'm/s',
+        tip: { d: 'Retreat Δv delivered so far in DEPART. Shown during DEPART or when non-zero.', src: STATE, th: 'Red: in DEPART.' } },
+    ],
+  ], apRow: true },
+  { title: 'Navigation', rows: [
+    [
+      { id: 'navrel', label: 'Relative Nav', wordy: true,
+        tip: { d: 'State of the relative navigation solution.', src: NAV, th: 'Green: valid. Yellow: converging, degraded or no LIDAR fix.' } },
+      { id: 'navatt', label: 'Attitude Source', wordy: true,
+        tip: { d: 'Sensors currently feeding the attitude solution.', src: NAV, th: 'Green: star tracker. Yellow: LIDAR pose or gyro only. Red: lost.' } },
+      { id: 'sigatt', label: 'σ Attitude', unit: '°', tip: { d: 'Filter 1-sigma attitude uncertainty.', src: NAV } },
+      { id: 'sigpos', label: 'σ Position', unit: 'cm', tip: { d: 'Filter 1-sigma position uncertainty.', src: NAV } },
+      { id: 'sigvel', label: 'σ Velocity', unit: 'mm/s', tip: { d: 'Filter 1-sigma velocity uncertainty.', src: NAV } },
+      { id: 'innov', label: 'Last Innovation', unit: 'σ', limits: [{ v: 4, sev: 'yellow' }], tip: { d: 'Size of the latest filter innovation, in sigmas.', src: NAV, th: 'Yellow: above 4 σ.' } },
+    ],
+    [
+      { id: 'gbias', label: 'Gyro Bias', wordy: true, sub: 'X / Y / Z, °/h', tip: { d: 'Estimated gyro bias per axis.', src: NAV } },
+      { id: 'abias', label: 'Accel Bias', wordy: true, sub: 'X / Y / Z, µg', tip: { d: 'Estimated accelerometer bias per axis.', src: NAV } },
+      { id: 'lidarok', label: 'LIDAR Used', tip: { d: 'LIDAR measurements accepted by the filter.', src: NAV } },
+      { id: 'lidarrej', label: 'LIDAR Rejected', tip: { d: 'LIDAR measurements rejected by the filter.', src: NAV, th: 'Yellow: any rejected.' } },
+      { id: 'lidarnone', label: 'LIDAR No Fix', tip: { d: 'Cycles with no LIDAR measurement available.', src: NAV } },
+      { id: 'inits', label: 'Filter Inits', tip: { d: 'Times the navigation filter has initialized.', src: NAV, th: 'Yellow: more than 1.' } },
+      { id: 'badread', label: 'Bad Readings', tip: { d: 'Sensor readings rejected as bad.', src: NAV, th: 'Yellow: any rejected.' } },
+    ],
+  ]},
+];
+
+function attTip(axis) {
+  return { d: `${axis} attitude error from the NAV quaternion.`, src: STATE,
+           th: 'Green: under 2°. Yellow: under 6°. Red: 6° or more.' };
+}
+
+function attLimits() {
+  return [{ v: 2, sev: 'yellow' }, { v: -2, sev: 'yellow' }, { v: 6, sev: 'red' }, { v: -6, sev: 'red' }];
+}
+
+const PHASE_SEV = { IDLE: 'gray', CORRECT: 'yellow', APPROACH: 'cyan', DOCKED: 'green',
+                    HOLD: 'purple', MANUAL: 'orange', DEPART: 'red' };
+
+const TIPS = {};   // every clickable box, by id
+
+// One plain-English sentence per box, for readers who didn't build this.
+const PLAIN = {
+  phase: 'What the spacecraft is currently doing, such as lining up, moving in, pausing, or docked.',
+  range: 'How far apart the two docking ports are.',
+  closing: 'How fast the spacecraft is moving toward its target.',
+  lateral: 'How far the spacecraft has strayed to the side of the straight line into the docking port.',
+  corridor: 'How much of the allowed sideways room is being used, where 100% means it has reached the edge.',
+  pitch: 'How far the spacecraft is tilted up or down from where it should be pointing.',
+  yaw: 'How far the spacecraft is turned left or right from where it should be pointing.',
+  roll: 'How far the spacecraft is twisted around its own centerline from where it should be.',
+
+  flag_LINK_UP: 'SET means the flight computer has received data from the simulator since it started.',
+  flag_IN_CORRIDOR: 'SET means the spacecraft is inside the safe cone-shaped path leading to the docking port.',
+  flag_HOLDPT1_ARMED: 'SET means the spacecraft has not yet reached its first, farther planned stopping point.',
+  flag_HOLDPT2_ARMED: 'SET means the spacecraft has not yet reached its second, closer planned stopping point.',
+  flag_CONTACT: 'SET means the docking latches have caught and the two vehicles are connected.',
+  flag_ABORT_LATCH: 'SET means an abort happened and the spacecraft will not guide itself again until it is told to GO.',
+  flag_BAD_CTRL: 'SET means the flight computer produced an unusable thruster calculation, so the spacecraft is coasting.',
+  flag_NAV_INVALID: 'SET means the spacecraft cannot currently trust its estimate of where it is relative to the target.',
+
+  c_att: 'How far the spacecraft has been from pointing the right way over time.',
+  c_pz: 'How far the spacecraft has been from the target along its main approach direction over time.',
+  c_vz: 'How fast the spacecraft has been moving along its main approach direction over time.',
+  c_rate: 'How quickly the spacecraft has been rotating over time.',
+  c_lat: 'How far the spacecraft has been off to the side of, or above or below, its approach path over time.',
+  c_vlat: 'How fast the spacecraft has been moving sideways or up and down over time.',
+
+  stale: 'How long it has been since the flight computer last received fresh data from the simulator.',
+  lastrx: 'The time this console last received an update from the guidance software.',
+  udp: 'How many updates the flight computer has received from the simulator.',
+  cycles: 'How many times the guidance software has run its steering calculations.',
+  cmdcnt: 'How many commands from this console the guidance software has accepted.',
+  cmderr: 'How many commands the guidance software has refused as invalid.',
+
+  lc: 'Whether the automatic safety monitor is switched on and watching for problems.',
+  streak: 'How many steps in a row a forward or backward thruster firing delivered far less push than expected.',
+  overspeed: 'How many steps the spacecraft has been going faster than allowed during its approach.',
+  corrstreak: 'How many steps the spacecraft has been outside the safe cone-shaped approach path.',
+  drift: 'How close the spacecraft would get to the docking port if its thrusters stopped firing now.',
+  cam: 'How much speed change has been applied so far while backing away from the target.',
+  ap0: 'Automatically aborts the docking if data from the simulator stops arriving.',
+  ap1: 'Automatically pauses the approach if the thrusters are not delivering the expected push.',
+  ap2: 'Automatically aborts the docking if the spacecraft loses track of where it is during the approach.',
+  ap3: 'Automatically pauses the approach if too many laser distance readings are being thrown out.',
+  ap4: 'Automatically pauses the approach if the spacecraft is moving too fast.',
+  ap5: 'Automatically aborts the docking if the spacecraft leaves the safe approach path.',
+
+  navrel: 'Whether the spacecraft has a reliable estimate of its position relative to the target.',
+  navatt: 'Which sensors the spacecraft is using to work out which way it is pointing.',
+  sigatt: 'How unsure the spacecraft is about which way it is pointing, where smaller is better.',
+  sigpos: 'How unsure the spacecraft is about its position, where smaller is better.',
+  sigvel: 'How unsure the spacecraft is about its speed, where smaller is better.',
+  innov: 'How much the latest sensor reading disagreed with what the spacecraft expected, where smaller is better.',
+  gbias: 'The estimated built-in error of the sensors that measure rotation.',
+  abias: 'The estimated built-in error of the sensors that measure acceleration.',
+  lidarok: 'How many laser distance readings the navigation software has accepted.',
+  lidarrej: 'How many laser distance readings the navigation software has thrown out as unreliable.',
+  lidarnone: 'How many times no laser distance reading was available.',
+  inits: 'How many times the navigation software has started its position estimate from scratch.',
+  badread: 'How many sensor readings have been discarded as bad.',
+};
+
+// ---------------------------------------------------------------------------
+// Tile construction
+// ---------------------------------------------------------------------------
+const tiles = {};
+const GLYPHS = { green: '●', yellow: '▲', red: '✕' };   // status never by color alone
+
+function makeTile(def) {
+  const el = document.createElement('div');
+  el.className = 'tile' + (def.hero ? ' hero' : '') + (def.wordy ? ' wordy' : '') + (def.flag ? ' flag' : '');
+  el.tabIndex = 0;
+  el.dataset.tip = def.id;
+  TIPS[def.id] = def;
+
+  const statLabels = def.stats || ['Min', 'Avg', 'Max'];
+  el.innerHTML =
+    `<div class="tile-head"><span class="tile-label">${esc(def.label)}</span><span class="tile-glyph"></span></div>` +
+    `<div class="tile-value"><span class="tile-v">---</span><span class="tile-u">${def.unit || ''}</span></div>` +
+    `<div class="tile-sub">${def.sub || ''}</div>` +
+    (def.trend ? '<svg class="tile-spark" viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"><polyline></polyline></svg>' : '') +
+    (def.bar !== undefined ? `<div class="tile-bar"><i></i><b style="left:${def.bar}%"></b></div>` : '') +
+    (def.hero ? `<div class="tile-stats">${statLabels.map(l => `<span><em>${l}</em><b>---</b></span>`).join('')}</div>` : '');
+
+  tiles[def.id] = {
+    el, def,
+    v: el.querySelector('.tile-v'),
+    u: el.querySelector('.tile-u'),
+    sub: el.querySelector('.tile-sub'),
+    glyph: el.querySelector('.tile-glyph'),
+    fill: el.querySelector('.tile-bar i'),
+    poly: el.querySelector('polyline'),
+    stats: [...el.querySelectorAll('.tile-stats b')],
+  };
+  return el;
+}
+
+function makeRow(defs) {
+  const row = document.createElement('div');
+  row.className = 'row' + (defs[0].hero ? ' hero-row' : '') + (defs[0].flag ? ' flag-row' : '');
+  defs.forEach(def => row.appendChild(makeTile(def)));
+  return row;
+}
+
+const chartViews = [];
+
+function makeChartPanel(def) {
+  const el = document.createElement('div');
+  el.className = 'tile chart-tile';
+  el.tabIndex = 0;
+  el.dataset.tip = def.id;
+  TIPS[def.id] = def;
+  el.innerHTML = `<div class="tile-head"><span class="tile-label">${esc(def.label)} (${esc(def.unit)})</span></div>`;
+  const view = makeChartView(def);
+  el.appendChild(view.el);
+  chartViews.push(view);
+  return el;
+}
+
+const apRows = {};
+LAYOUT.forEach(section => {
+  const sec = document.createElement('section');
+  sec.className = 'section';
+  sec.innerHTML = `<div class="section-title">${esc(section.title)}</div>`;
+  section.rows.forEach(defs => sec.appendChild(makeRow(defs)));
+  if (section.charts) {
+    const row = document.createElement('div');
+    row.className = 'row chart-row';
+    section.charts.forEach(def => row.appendChild(makeChartPanel(def)));
+    sec.appendChild(row);
+  }
+  if (section.apRow) {
+    apRows.parent = sec;
+  }
+  document.getElementById('tiles').appendChild(sec);
+});
+
+function ensureApTiles(fdir) {
+  if (apRows.row || !fdir.length) return;
+  apRows.row = makeRow(fdir.map(ap => {
+    const [cond, response] = ap.label.split(' -> ');
+    return {
+      id: 'ap' + ap.ap, label: cond, wordy: false,
+      tip: { d: `LC actionpoint ${ap.ap}: ${cond}. On failure the response is ${response}.`, src: LC,
+             th: 'Green: active and passing. Red: failing. Yellow: actionpoint not ACTIVE.' },
+    };
+  }));
+  apRows.parent.appendChild(apRows.row);
+}
+
+// value text, severity, and optional { unit, sub, pct }
+function tile(id, value, sev, opts = {}) {
+  const t = tiles[id];
+  if (!t) return;
+  setText(t.v, value);
+  t.el.dataset.sev = sev || '';
+  if (t.def.glyph !== false) setText(t.glyph, GLYPHS[sev] || '');
+  if (opts.sub !== undefined) setText(t.sub, opts.sub);
+  if (opts.pct !== undefined && t.fill) t.fill.style.width = opts.pct + '%';
+  track(id, value, sev);
+}
+
+function setText(node, text) {
+  if (node && node.textContent !== text) node.textContent = text;
+}
+
+// ---------------------------------------------------------------------------
+// History: numeric values as samples, text states as a list of changes
+// ---------------------------------------------------------------------------
+const HISTORY_MAX = 3000;     // 10 min of 5 Hz samples
+const SPARK_SAMPLES = 150;    // 30 s of 5 Hz samples
+const samples = {};           // key -> [{t, v}]
+const changes = {};           // tile id -> [{t, clock, value, sev}]
+const nowS = () => performance.now() / 1000;
+const STATE_KEYS = new Set(['range', 'closing', 'lateral', 'corridor', 'pitch', 'yaw', 'roll']);
+const DEG = 180 / Math.PI;
+
+function pushSample(key, v, t) {
+  const h = samples[key] ||= [];
+  h.push({ t, v });
+  if (h.length > HISTORY_MAX) h.shift();
+}
+
+function recordState(msg) {
+  const t = nowS();
+  const [pitch, yaw, roll] = msg.att_err_deg;
+  const values = {
+    range: msg.range_m, closing: msg.closing_ms, lateral: msg.lateral_m,
+    corridor: Math.min(msg.lateral_m / 0.50 * 100, 100), pitch, yaw, roll,
+  };
+  (msg.ang_vel ?? []).forEach((w, i) => values['w' + 'xyz'[i]] = w * DEG);
+  (msg.rel_pos ?? []).forEach((p, i) => values['p' + 'xyz'[i]] = p);
+  (msg.rel_vel ?? []).forEach((v, i) => values['v' + 'xyz'[i]] = v);
+  for (const key in values) pushSample(key, values[key], t);
+}
+
+// Sampling for every other box, driven by what the tile displays.
+function track(id, value, sev) {
+  if (STATE_KEYS.has(id) || value === '---') return;
+  const t = nowS();
+  const num = Number(value);
+  if (Number.isFinite(num)) {
+    const h = samples[id];
+    if (!h || t - h[h.length - 1].t >= 0.19) pushSample(id, num, t);
+    return;
+  }
+  const list = changes[id] ||= [];
+  if (!list.length || list[list.length - 1].value !== value) {
+    list.push({ t, clock: new Date().toTimeString().slice(0, 8), value, sev });
+    if (list.length > 200) list.shift();
+  }
+}
+
+function summarize(points) {
+  const vals = points.map(p => p.v);
+  return { min: Math.min(...vals), max: Math.max(...vals), avg: vals.reduce((a, b) => a + b, 0) / vals.length };
+}
+
+function fmtDur(s) {
+  if (s < 60) return `${Math.floor(s)} s`;
+  return `${Math.floor(s / 60)}m ${String(Math.floor(s % 60)).padStart(2, '0')}s`;
+}
+
+function renderTrends() {
+  for (const t of Object.values(tiles)) {
+    if (!t.def.trend) continue;
+    const recent = (samples[t.def.id] || []).slice(-SPARK_SAMPLES);
+    if (!recent.length) continue;
+    const { min, max, avg } = summarize(recent);
+    const dec = t.def.dec;
+    drawSpark(t.poly, recent, min, max);
+    [min, avg, max].forEach((v, i) => setText(t.stats[i], v.toFixed(dec)));
+  }
+  const phases = changes.phase || [];
+  if (phases.length) {
+    const s = tiles.phase.stats;
+    setText(s[0], fmtDur(nowS() - phases[phases.length - 1].t));
+    setText(s[1], phases.length > 1 ? phases[phases.length - 2].value : '---');
+    setText(s[2], String(phases.length - 1));
+  }
+  chartViews.forEach(v => v.draw());
+}
+
+function drawSpark(poly, recent, lo, hi) {
+  const span = hi - lo;
+  const pts = recent.map((p, i) => {
+    const x = 100 - (recent.length - 1 - i) / (SPARK_SAMPLES - 1) * 100;
+    const y = span < 1e-9 ? 11 : 20 - (p.v - lo) / span * 18;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  poly.setAttribute('points', pts.join(' '));
+}
+
+// ---------------------------------------------------------------------------
+// Line charts: shared by the dashboard panels and the detail window
+// ---------------------------------------------------------------------------
+function niceTicks(lo, hi) {
+  const raw = (hi - lo) / 3;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / mag;
+  const step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * mag;
+  const dec = step >= 1 ? 0 : Math.min(4, Math.ceil(-Math.log10(step)));
+  const ticks = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-6; v += step) {
+    ticks.push({ v, text: (Math.abs(v) < step * 1e-6 ? 0 : v).toFixed(dec) });
+  }
+  return ticks;
+}
+
+function makeChartView(cfg, opts = {}) {
+  const el = document.createElement('div');
+  el.className = 'chart-view';
+
+  const legend = document.createElement('div');
+  legend.className = 'chart-legend';
+  const single = cfg.series.length === 1;
+  const legendVals = cfg.series.map(([, label, slot]) => {
+    const item = document.createElement('span');
+    item.className = 'lg';
+    if (!single) {
+      const key = document.createElement('i');
+      key.style.background = `var(--s${slot})`;
+      item.append(key, label);
+    }
+    const val = document.createElement('b');
+    val.textContent = '---';
+    item.appendChild(val);
+    legend.appendChild(item);
+    return val;
+  });
+  const at = document.createElement('span');
+  at.className = 'at';
+  legend.appendChild(at);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'chart-svg');
+  el.append(legend, svg);
+
+  const view = { el, win: opts.win || 60, hoverX: null, draw };
+
+  if (opts.interactive) {
+    svg.addEventListener('pointermove', e => {
+      view.hoverX = e.clientX - svg.getBoundingClientRect().left;
+      draw();
+    });
+    svg.addEventListener('pointerleave', () => { view.hoverX = null; draw(); });
+  }
+
+  function draw() {
+    const W = svg.clientWidth, H = svg.clientHeight;
+    if (!W || !H) return;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+    const now = nowS();
+    const earliest = Math.min(...cfg.series.map(([k]) => samples[k]?.[0]?.t ?? now));
+    const win = view.win === Infinity ? Math.max(30, now - earliest) : view.win;
+    const t0 = now - win;
+    const visible = cfg.series.map(([k]) => (samples[k] || []).filter(p => p.t >= t0));
+    const all = visible.flat().map(p => p.v);
+    if (!all.length) {
+      svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">No data yet</text>`;
+      return;
+    }
+
+    const limits = cfg.limits || [];
+    let lo = Math.min(...all, ...limits.map(l => l.v));
+    let hi = Math.max(...all, ...limits.map(l => l.v));
+    const minSpan = cfg.minSpan ?? 4 * Math.pow(10, -(cfg.dec ?? 2));
+    if (hi - lo < minSpan) {
+      const mid = (hi + lo) / 2;
+      lo = mid - minSpan / 2;
+      hi = mid + minSpan / 2;
+    }
+    const pad = (hi - lo) * 0.08;
+    lo -= pad;
+    hi += pad;
+
+    const m = { l: 42, r: 8, t: 6, b: 16 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    const x = t => m.l + (t - t0) / win * iw;
+    const y = v => m.t + (hi - v) / (hi - lo) * ih;
+    const parts = [];
+
+    niceTicks(lo, hi).forEach(tick => {
+      const yy = y(tick.v).toFixed(1);
+      const cls = Number(tick.text) === 0 ? 'zero' : 'grid';
+      parts.push(`<line class="${cls}" x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}"/>`,
+                 `<text x="${m.l - 5}" y="${(+yy + 3).toFixed(1)}" text-anchor="end">${tick.text}</text>`);
+    });
+    limits.forEach(l => {
+      const yy = y(l.v).toFixed(1);
+      parts.push(`<line class="limit" style="stroke:var(--${l.sev})" x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}"/>`);
+    });
+    const axisY = H - 4;
+    const ago = s => (s >= 60 ? `-${(s / 60).toFixed(s % 60 ? 1 : 0)} min` : `-${s.toFixed(0)} s`);
+    parts.push(`<text x="${m.l}" y="${axisY}">${ago(win)}</text>`,
+               `<text x="${m.l + iw / 2}" y="${axisY}" text-anchor="middle">${ago(win / 2)}</text>`,
+               `<text x="${W - m.r}" y="${axisY}" text-anchor="end">now</text>`);
+
+    cfg.series.forEach(([, , slot], i) => {
+      const pts = visible[i].map(p => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+      parts.push(`<polyline style="stroke:var(--s${slot})" points="${pts}"/>`);
+    });
+
+    // Readout: latest values, or the values under the crosshair.
+    let hoverT = null;
+    if (view.hoverX !== null) {
+      hoverT = t0 + Math.max(0, Math.min(iw, view.hoverX - m.l)) / iw * win;
+      parts.push(`<line class="cross" x1="${x(hoverT).toFixed(1)}" x2="${x(hoverT).toFixed(1)}" y1="${m.t}" y2="${H - m.b}"/>`);
+    }
+    const dec = cfg.dec ?? 2;
+    visible.forEach((pts, i) => {
+      if (!pts.length) return;
+      const p = hoverT === null ? pts[pts.length - 1]
+        : pts.reduce((a, b) => Math.abs(b.t - hoverT) < Math.abs(a.t - hoverT) ? b : a);
+      setText(legendVals[i], p.v.toFixed(dec) + (cfg.unit ? ' ' + cfg.unit : ''));
+    });
+    setText(at, hoverT === null ? '' : `${(now - hoverT).toFixed(1)} s ago`);
+
+    svg.innerHTML = parts.join('');
+  }
+  return view;
+}
+
 // ---------------------------------------------------------------------------
 // SSE connection
 // ---------------------------------------------------------------------------
 const MAX_LOG_ENTRIES = 200;
 let logCount = 0;
 let lastPhase = null;
-let phaseHistory = [];
-let receivedAny = false;
+const phaseHistory = [];
 
 const evtSource = new EventSource('/events');
 
@@ -578,12 +1045,14 @@ const evtSource = new EventSource('/events');
 const gncState = {};
 
 evtSource.addEventListener('gnc', e => {
-  Object.assign(gncState, JSON.parse(e.data));
+  const msg = JSON.parse(e.data);
+  Object.assign(gncState, msg);
+  const isState = msg.range_m !== undefined && !!msg.last_rx;
+  if (isState) recordState(msg);
   updateGnc(gncState);
-  if (!receivedAny) {
-    receivedAny = true;
-    setConnBadge(true);
-  }
+  if (isState) renderTrends();
+  renderDetail();
+  setConnBadge(!!gncState.last_rx);   // the page connects before any telemetry exists
 });
 
 evtSource.addEventListener('evs', e => {
@@ -591,129 +1060,128 @@ evtSource.addEventListener('evs', e => {
   appendLog(d.ts, d.type, d.app, d.msg);
 });
 
-evtSource.onerror = () => {
-  setConnBadge(false);
-};
+evtSource.onerror = () => setConnBadge(false);
 
 // ---------------------------------------------------------------------------
 // GNC update
 // ---------------------------------------------------------------------------
 function updateGnc(d) {
   const phase = d.phase || '---';
-  setBadge('phase-badge', phase);
-  document.getElementById('s-phase').textContent = phase;
-  document.getElementById('s-phase').className = 'stat-val ' + phaseClass(phase);
+  tile('phase', phase, PHASE_SEV[phase] || 'gray');
+  updateTimeline(phase, d.last_rx);
 
-  if (phase !== lastPhase && d.last_rx) {
-    phaseHistory.unshift(`${d.last_rx}  →  ${phase}`);
-    if (phaseHistory.length > 8) phaseHistory.pop();
-    document.getElementById('phase-history').innerHTML =
-      phaseHistory.map(l => `<div>${l}</div>`).join('');
-    lastPhase = phase;
+  updateFdir(d);
+  if (d.nav_rps) updateNav(d);
+  if (d.last_rx) {          // until the first packet the server's zeros aren't data
+    updateFlags(d.flags ?? []);
+    updateApproach(d);
+    updateLink(d);
   }
+}
 
+function updateTimeline(phase, rx) {
+  if (phase === lastPhase || !rx) return;
+  lastPhase = phase;
+  phaseHistory.unshift({ rx, phase });
+  if (phaseHistory.length > 8) phaseHistory.pop();
+  document.getElementById('phase-history').innerHTML = phaseHistory.map(p =>
+    `<div class="tl-row"><span class="tl-time">${esc(p.rx)}</span>` +
+    `<span class="tl-phase" data-sev="${PHASE_SEV[p.phase] || 'gray'}">${esc(p.phase)}</span></div>`).join('');
+}
+
+function updateFlags(flags) {
+  FLAGS.forEach(([name]) => {
+    const on = flags.includes(name);
+    tile('flag_' + name, on ? 'SET' : 'CLEAR', on ? (BAD_FLAGS.has(name) ? 'red' : 'green') : 'gray');
+  });
+}
+
+function updateApproach(d) {
   const closing = d.closing_ms ?? 0;
   const lateral = d.lateral_m ?? 0;
-  const range   = d.range_m ?? 0;
-  const att     = d.att_err_deg ?? [0, 0, 0];
+  const att = d.att_err_deg ?? [0, 0, 0];
+  const range = d.range_m ?? 0;
 
-  set('t-range', range.toFixed(2) + ' m', 'gray');
-  const attMax = Math.max(...att.map(Math.abs));
-  set('t-att', att.map(a => a.toFixed(1)).join(' / ') + ' °',
-      attMax < 2 ? 'green' : attMax < 6 ? 'yellow' : 'red');
-  set('t-flags', (d.flags && d.flags.length) ? d.flags.join(' ') : '---', 'gray');
+  tile('range', range.toFixed(2), '', {
+    sub: closing > 0 ? `Contact in ${fmtDur(range / closing)} at this speed` : 'Not closing',
+  });
 
-  // FDIR
-  const lcEl = document.getElementById('fdir-lc');
-  lcEl.textContent = d.lc_state ?? '---';
-  lcEl.className = d.lc_state === 'ACTIVE' ? 'green' : 'yellow';
-  document.getElementById('fdir-aps').innerHTML = (d.fdir ?? []).map(ap => {
-    const cls = ap.state !== 'ACTIVE' ? 'yellow' : ap.result === 'FAIL' ? 'red' : 'green';
-    return `<div class="fdir-row"><span class="lbl">AP${ap.ap} ${esc(ap.label)}</span>` +
-           `<span class="${cls}">${ap.state} / ${ap.result}</span></div>`;
-  }).join('');
-  const streak = d.streak ?? 0;
-  const stEl = document.getElementById('fdir-streak');
-  stEl.textContent = streak;
-  stEl.className = streak >= 3 ? 'red' : streak > 0 ? 'yellow' : 'green';
-  if (d.overspeed !== undefined) {
-    const env = Math.max(d.overspeed, d.corridor);
-    set('fdir-env', `${d.overspeed} / ${d.corridor}`, env >= 5 ? 'red' : env > 0 ? 'yellow' : 'green');
-    set('fdir-drift', d.drift_safe_m > 0 ? `${d.drift_safe_m.toFixed(1)} m` : '---',
-        d.drift_safe_m >= 10 ? 'green' : d.drift_safe_m > 0 ? 'yellow' : 'gray');
-    set('fdir-cam', d.phase === 'DEPART' || d.cam_dv > 0 ? `${d.cam_dv.toFixed(3)} m/s` : '---',
-        d.phase === 'DEPART' ? 'red' : 'gray');
-  }
-  const stale   = d.stale_sec ?? 0;
-  const cmdErr  = d.cmd_err  ?? 0;
+  const closingSev = closing > 0.30 ? 'red' : closing > 0 ? 'green' : 'gray';
+  tile('closing', fmtSgn(closing, 3), closingSev, {
+    pct: Math.min(Math.abs(closing) / 0.35 * 100, 100),
+    sub: closing > 0.30 ? 'Over 0.30 limit' : closing > 0 ? 'Within 0.30 limit' : 'Not closing',
+  });
 
-  // NAV (1 Hz HK)
-  if (d.nav_rps) {
-    set('nav-rel', d.nav_relnav ? 'VALID' : d.nav_filter ? 'CONVERGING / DEGRADED' : 'NO LIDAR FIX',
-        d.nav_relnav ? 'green' : 'yellow');
-    set('nav-att', !d.nav_att ? 'LOST' : d.nav_st ? (d.nav_pose ? 'STAR TRACKER + LIDAR POSE' : 'STAR TRACKER')
-                   : d.nav_pose ? 'LIDAR POSE ONLY' : 'GYRO PROPAGATED',
-        !d.nav_att ? 'red' : d.nav_st ? 'green' : 'yellow');
-    if (d.nav_gyro_bias) {
-      set('nav-att-sigma', `${(d.nav_att_sigma * 180 / Math.PI).toFixed(4)}°`, 'gray');
-      set('nav-gbias', d.nav_gyro_bias.map(b => (b * 180 / Math.PI * 3600).toFixed(2)).join(' / '), 'gray');
-      set('nav-abias', d.nav_accel_bias.map(b => (b / 9.80665 * 1e6).toFixed(1)).join(' / '), 'gray');
-    }
-    set('nav-sigma', `${(d.nav_sigma[0] * 100).toFixed(1)} cm / ${(d.nav_sigma[1] * 1000).toFixed(2)} mm/s`, 'gray');
-    set('nav-rps', d.nav_rps.join(' / '), d.nav_rps[1] > 0 ? 'yellow' : 'gray');
-    set('nav-innov', `${d.nav_innov.toFixed(1)} σ`, d.nav_innov > 4 ? 'yellow' : 'gray');
-    set('nav-inits', `${d.nav_inits} / ${d.nav_sensor_rej}`, d.nav_inits > 1 || d.nav_sensor_rej > 0 ? 'yellow' : 'gray');
-  }
+  tile('lateral', lateral.toFixed(3), lateral <= 0.10 ? 'green' : lateral <= 0.50 ? 'yellow' : 'red', {
+    pct: Math.min(lateral / 1.0 * 100, 100),
+    sub: 'Gate 0.50 m',
+  });
 
-  // Closing speed
-  const closingOk = closing > 0 && closing <= 0.30;
-  const closingCls = closingOk ? 'green' : (closing > 0 ? 'red' : 'gray');
-  set('t-closing', fmtSgn(closing, 3) + ' m/s', closingCls);
-  gauge('g-closing', Math.min(Math.abs(closing) / 0.35 * 100, 100),
-        closingOk ? 'var(--green)' : 'var(--red)');
-  document.getElementById('g-closing-val').textContent = fmtSgn(closing, 3) + ' m/s';
-
-  // Lateral offset
-  const latOk = lateral <= 0.10;
-  const latCls = latOk ? 'green' : (lateral <= 0.50 ? 'yellow' : 'red');
-  set('t-lateral', lateral.toFixed(3) + ' m', latCls);
-  gauge('g-lateral', Math.min(lateral / 1.0 * 100, 100),
-        latOk ? 'var(--green)' : lateral <= 0.50 ? 'var(--yellow)' : 'var(--red)');
-  document.getElementById('g-lateral-val').textContent = lateral.toFixed(3) + ' m';
-
-  // Corridor approach gauge (0 → 0.50 m gate)
   const corrPct = Math.min(lateral / 0.50 * 100, 100);
-  document.getElementById('corr-pct-val').textContent = corrPct.toFixed(0) + '%';
-  gauge('corr-gauge', corrPct, corrPct < 100 ? 'var(--green)' : 'var(--red)');
+  tile('corridor', corrPct.toFixed(0), corrPct < 100 ? 'green' : 'red', { pct: corrPct, sub: 'Of 0.50 m gate' });
 
-  // Closing limit indicator
-  const clEl = document.getElementById('closing-limit');
-  if (closing > 0.30) {
-    clEl.textContent = 'OVER LIMIT'; clEl.className = 'red';
-  } else if (closing > 0) {
-    clEl.textContent = 'OK'; clEl.className = 'green';
-  } else {
-    clEl.textContent = '---'; clEl.className = '';
+  ['pitch', 'yaw', 'roll'].forEach((id, i) => {
+    const mag = Math.abs(att[i]);
+    tile(id, fmtSgn(att[i], 1), mag < 2 ? 'green' : mag < 6 ? 'yellow' : 'red',
+         d.ang_vel ? { sub: `Rate ${fmtSgn(d.ang_vel[i] * DEG, 2)} °/s` } : {});
+  });
+}
+
+function updateLink(d) {
+  const stale = d.stale_sec ?? 0;
+  const cmdErr = d.cmd_err ?? 0;
+  tile('stale', String(stale), stale >= 5 ? 'red' : stale >= 2 ? 'yellow' : 'green');
+  tile('lastrx', d.last_rx);
+  tile('udp', String(d.udp_pkts ?? '---'));
+  tile('cycles', String(d.wakeup ?? '---'));
+  tile('cmdcnt', String(d.cmd_cnt ?? '---'));
+  tile('cmderr', String(cmdErr), cmdErr > 0 ? 'red' : 'green');
+}
+
+function updateFdir(d) {
+  if (d.lc_state && d.lc_state !== '---') tile('lc', d.lc_state, d.lc_state === 'ACTIVE' ? 'green' : 'yellow');
+
+  const fdir = d.fdir ?? [];
+  ensureApTiles(fdir);
+  fdir.forEach(ap => {
+    const response = ap.label.split(' -> ')[1];
+    const sev = ap.state !== 'ACTIVE' ? 'yellow' : ap.result === 'FAIL' ? 'red' : 'green';
+    tile('ap' + ap.ap, ap.state === 'ACTIVE' ? ap.result : ap.state, sev,
+         { sub: `AP${ap.ap} · ${ap.state} / ${ap.result} · ${response}` });
+  });
+
+  if (!d.last_rx) return;
+  const streak = d.streak ?? 0;
+  tile('streak', String(streak), streak >= 3 ? 'red' : streak > 0 ? 'yellow' : 'green');
+  if (d.overspeed !== undefined) {
+    tile('overspeed', String(d.overspeed), d.overspeed >= 5 ? 'red' : d.overspeed > 0 ? 'yellow' : 'green');
+    tile('corrstreak', String(d.corridor), d.corridor >= 5 ? 'red' : d.corridor > 0 ? 'yellow' : 'green');
+    tile('drift', d.drift_safe_m > 0 ? d.drift_safe_m.toFixed(1) : '---',
+         d.drift_safe_m >= 10 ? 'green' : d.drift_safe_m > 0 ? 'yellow' : 'gray');
+    const showCam = d.phase === 'DEPART' || d.cam_dv > 0;
+    tile('cam', showCam ? d.cam_dv.toFixed(3) : '---', d.phase === 'DEPART' ? 'red' : 'gray');
   }
+}
 
-  // Stale
-  const staleCls = stale >= 5 ? 'red' : stale >= 2 ? 'yellow' : 'green';
-  set('t-stale', stale + ' s', staleCls);
-  document.getElementById('s-stale').textContent = stale;
-  document.getElementById('s-stale').className = 'stat-val ' + (stale >= 5 ? 'alert' : 'ok');
-
-  // Cmd errors
-  const errCls = cmdErr > 0 ? 'red' : 'gray';
-  set('t-cmd-err', String(cmdErr), errCls);
-  document.getElementById('s-cmd-err').textContent = cmdErr;
-  document.getElementById('s-cmd-err').className = 'stat-val ' + (cmdErr > 0 ? 'alert' : 'ok');
-
-  set('t-wakeup',   String(d.wakeup   ?? '---'), 'gray');
-  set('t-cmd-cnt',  String(d.cmd_cnt  ?? '---'), 'gray');
-  set('t-udp-pkts', String(d.udp_pkts ?? '---'), 'gray');
-  document.getElementById('s-udp').textContent = d.udp_pkts ?? 0;
-
-  if (d.last_rx) set('t-last-rx', d.last_rx, 'gray');
+function updateNav(d) {
+  tile('navrel', d.nav_relnav ? 'VALID' : d.nav_filter ? 'CONVERGING / DEGRADED' : 'NO LIDAR FIX',
+       d.nav_relnav ? 'green' : 'yellow');
+  tile('navatt', !d.nav_att ? 'LOST' : d.nav_st ? (d.nav_pose ? 'STAR TRACKER + LIDAR POSE' : 'STAR TRACKER')
+                 : d.nav_pose ? 'LIDAR POSE ONLY' : 'GYRO PROPAGATED',
+       !d.nav_att ? 'red' : d.nav_st ? 'green' : 'yellow');
+  if (d.nav_gyro_bias) {
+    tile('sigatt', (d.nav_att_sigma * 180 / Math.PI).toFixed(4));
+    tile('gbias', d.nav_gyro_bias.map(b => (b * 180 / Math.PI * 3600).toFixed(2)).join(' / '));
+    tile('abias', d.nav_accel_bias.map(b => (b / 9.80665 * 1e6).toFixed(1)).join(' / '));
+  }
+  tile('sigpos', (d.nav_sigma[0] * 100).toFixed(1));
+  tile('sigvel', (d.nav_sigma[1] * 1000).toFixed(2));
+  tile('innov', d.nav_innov.toFixed(1), d.nav_innov > 4 ? 'yellow' : '');
+  tile('lidarok', String(d.nav_rps[0]));
+  tile('lidarrej', String(d.nav_rps[1]), d.nav_rps[1] > 0 ? 'yellow' : '');
+  tile('lidarnone', String(d.nav_rps[2]));
+  tile('inits', String(d.nav_inits), d.nav_inits > 1 ? 'yellow' : '');
+  tile('badread', String(d.nav_sensor_rej), d.nav_sensor_rej > 0 ? 'yellow' : '');
 }
 
 // ---------------------------------------------------------------------------
@@ -726,15 +1194,15 @@ function appendLog(ts, type, app, msg) {
   const div = document.createElement('div');
   div.className = 'log-entry';
   div.innerHTML =
-    `<span class="log-ts">${ts || ''}</span>` +
-    `<span class="log-type ${type}">${type}</span>` +
+    `<span class="log-ts">${esc(ts || '')}</span>` +
+    `<span class="log-type ${esc(type)}">${esc(type)}</span>` +
     `<span class="log-app">${esc(app)}</span>` +
-    `<span class="log-msg ${type}">${esc(msg)}</span>`;
+    `<span class="log-msg ${esc(type)}"></span>`;
+  div.lastChild.textContent = msg;
   log.appendChild(div);
   logCount++;
   document.getElementById('log-count').textContent = logCount;
 
-  // trim
   while (log.children.length > MAX_LOG_ENTRIES) log.removeChild(log.firstChild);
 
   if (atBottom) log.scrollTop = log.scrollHeight;
@@ -779,7 +1247,15 @@ function sendToEnable() {
 
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if (!detail) deselect(); return; }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.tile[data-tip]')) {
+    e.preventDefault();
+    activateBox(e.target);
+    return;
+  }
   if (e.target.tagName === 'INPUT') return;
+  // Leave browser shortcuts alone: Cmd+A must not ABORT, Cmd+R must not RESET.
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase();
   if (k === 'n') sendCmd('gnc_noop');
   else if (k === 'r') sendCmd('gnc_reset');
@@ -791,53 +1267,225 @@ document.addEventListener('keydown', e => {
 });
 
 // ---------------------------------------------------------------------------
+// Box selection: first click highlights and shows the tooltip, second expands
+// ---------------------------------------------------------------------------
+const tipEl = document.getElementById('tip');
+let selected = null;
+
+function activateBox(box) {
+  if (box === selected) openDetail(box); else selectBox(box);
+}
+
+function selectBox(box) {
+  deselect();
+  selected = box;
+  box.classList.add('selected');
+  const entry = TIPS[box.dataset.tip];
+  tipEl.innerHTML = `<div class="tip-title">${esc(entry.label)}</div>` +
+    (PLAIN[entry.id] ? `<div class="tip-plain">${esc(PLAIN[entry.id])}</div>` : '') +
+    `<div class="tip-body">${esc(entry.tip.d)}</div>` +
+    (entry.trend ? '<div class="tip-meta">Trend and Min/Avg/Max cover the last 30 s.</div>' : '') +
+    (entry.tip.th ? `<div class="tip-meta">${esc(entry.tip.th)}</div>` : '') +
+    `<div class="tip-meta">${esc(entry.tip.src)}</div>` +
+    '<div class="tip-hint">Click again to expand</div>';
+  tipEl.hidden = false;
+  positionTip();
+}
+
+function deselect() {
+  if (selected) selected.classList.remove('selected');
+  selected = null;
+  tipEl.hidden = true;
+}
+
+function positionTip() {
+  if (!selected) return;
+  const r = selected.getBoundingClientRect();
+  const t = tipEl.getBoundingClientRect();
+  const left = Math.max(6, Math.min(r.left, innerWidth - t.width - 6));
+  const top = r.top - t.height - 6 >= 6 ? r.top - t.height - 6 : r.bottom + 6;
+  tipEl.style.left = left + 'px';
+  tipEl.style.top = top + 'px';
+}
+
+document.addEventListener('click', e => {
+  if (detail) return;
+  const box = e.target.closest('.tile[data-tip]');
+  if (box) activateBox(box); else deselect();
+});
+document.getElementById('tiles').addEventListener('scroll', positionTip);
+window.addEventListener('scroll', positionTip);
+window.addEventListener('resize', positionTip);
+
+// ---------------------------------------------------------------------------
+// Detail window
+// ---------------------------------------------------------------------------
+const dlg = document.getElementById('detail');
+const $ = id => document.getElementById(id);
+let detail = null;    // { entry, view } while the window is open
+
+function openDetail(box) {
+  const entry = TIPS[box.dataset.tip];
+  deselect();
+
+  // A chart panel brings its series; a numeric box charts its own samples;
+  // a text box (phase, flags, actionpoints) lists its changes instead.
+  const isNumeric = !!samples[entry.id]?.length;
+  const cfg = entry.series ? entry
+    : isNumeric ? { series: [[entry.id, entry.label, 1]], unit: entry.unit || '', dec: entry.dec ?? numericDec(entry.id),
+                    limits: entry.limits, minSpan: entry.minSpan }
+    : null;
+  detail = { entry, view: cfg ? makeChartView(cfg, { interactive: true, win: 60 }) : null };
+
+  $('detail-title').textContent = entry.series ? `${entry.label} (${entry.unit})` : entry.label;
+  $('detail-plain').textContent = PLAIN[entry.id] || entry.tip.d;
+  $('detail-desc').textContent = entry.tip.d;
+  $('detail-colors').hidden = !entry.tip.th;
+  $('detail-th').textContent = entry.tip.th || '';
+  $('detail-src').textContent = entry.tip.src;
+  $('detail-now').hidden = !!entry.series;
+  $('detail-ranges').hidden = !cfg;
+  $('detail-chart').replaceChildren(...(cfg ? [detail.view.el] : []));
+  $('detail-thead').innerHTML = '<tr>' + (cfg
+    ? ['Series', 'Current', 'Min', 'Max', 'Avg', 'Samples']
+    : ['Time', 'Value', 'Held']).map(h => `<th>${h}</th>`).join('') + '</tr>';
+  setRange(60);
+
+  dlg.showModal();
+  renderDetail();
+}
+
+// How many decimals the tile itself shows, so the stats table matches it.
+function numericDec(id) {
+  const text = tiles[id]?.v.textContent ?? '';
+  return (text.split('.')[1] || '').length;
+}
+
+function setRange(win) {
+  if (detail.view) detail.view.win = win;
+  document.querySelectorAll('#detail-ranges button').forEach(b => {
+    const w = b.dataset.win === 'all' ? Infinity : Number(b.dataset.win);
+    b.setAttribute('aria-pressed', String(w === win));
+  });
+}
+
+function renderDetail() {
+  if (!detail) return;
+  const { entry, view } = detail;
+
+  const t = tiles[entry.id];
+  if (t) {
+    setText($('detail-v'), t.v.textContent);
+    setText($('detail-u'), t.u.textContent);
+    setText($('detail-sub'), t.sub.textContent);
+    $('detail-now').dataset.sev = t.el.dataset.sev || '';
+  }
+
+  if (view) {
+    view.draw();
+    renderStatsTable(view);
+  } else {
+    renderChangesTable(entry.id);
+  }
+}
+
+function renderStatsTable(view) {
+  const now = nowS();
+  const cfg = detail.entry.series ? detail.entry : { series: [[detail.entry.id, detail.entry.label, 1]],
+                                                     dec: detail.entry.dec ?? numericDec(detail.entry.id) };
+  const t0 = view.win === Infinity ? -Infinity : now - view.win;
+  $('detail-tbody').innerHTML = cfg.series.map(([key, label]) => {
+    const pts = (samples[key] || []).filter(p => p.t >= t0);
+    if (!pts.length) return `<tr><td>${esc(label)}</td><td>---</td><td>---</td><td>---</td><td>---</td><td>0</td></tr>`;
+    const { min, max, avg } = summarize(pts);
+    const cells = [pts[pts.length - 1].v, min, max, avg].map(v => v.toFixed(cfg.dec ?? 2));
+    return `<tr><td>${esc(label)}</td>${cells.map(c => `<td>${c}</td>`).join('')}<td>${pts.length}</td></tr>`;
+  }).join('');
+}
+
+function renderChangesTable(id) {
+  const list = changes[id] || [];
+  if (!list.length) {
+    $('detail-tbody').innerHTML = '<tr><td colspan="3">No data received yet.</td></tr>';
+    return;
+  }
+  const now = nowS();
+  $('detail-tbody').innerHTML = list.map((c, i) => {
+    const held = (i + 1 < list.length ? list[i + 1].t : now) - c.t;
+    return `<tr><td>${esc(c.clock)}</td><td data-sev="${c.sev || ''}">${esc(c.value)}</td>` +
+           `<td>${i + 1 < list.length ? fmtDur(held) : fmtDur(held) + ' (now)'}</td></tr>`;
+  }).reverse().join('');
+}
+
+document.getElementById('detail-ranges').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  setRange(b.dataset.win === 'all' ? Infinity : Number(b.dataset.win));
+  renderDetail();
+});
+dlg.querySelector('.detail-close').addEventListener('click', () => dlg.close());
+dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });   // backdrop
+dlg.addEventListener('close', () => { detail = null; });
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function set(id, text, cls) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = text;
-  el.className = 'val ' + (cls || '');
-}
-
-function gauge(id, pct, color) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.style.width = pct + '%';
-  el.style.background = color;
-}
-
 function fmtSgn(v, dec) {
   return (v >= 0 ? '+' : '') + v.toFixed(dec);
 }
 
 function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function setBadge(id, phase) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = phase;
-  el.className = 'phase-badge ' + phase;
-}
-
-function phaseClass(phase) {
-  const map = {IDLE:'gray', CORRECT:'yellow', APPROACH:'cyan', DOCKED:'ok', HOLD:'', MANUAL:'yellow', DEPART:'red'};
-  return map[phase] || '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function setConnBadge(live) {
   const el = document.getElementById('conn-badge');
-  if (live) { el.textContent = '● LIVE'; el.className = 'hdr-badge live'; }
-  else { el.textContent = '○ WAITING'; el.className = 'hdr-badge wait'; }
+  el.textContent = live ? '● LIVE' : '○ WAITING';
+  el.className = live ? 'live' : 'wait';
 }
 
+// ---------------------------------------------------------------------------
+// Event log view: collapsed -> semi (no messages) -> full
+// ---------------------------------------------------------------------------
+const LOG_MODES = {
+  collapsed: { next: 'semi',      glyph: '‹', hint: 'Show time, severity and app' },
+  semi:      { next: 'full',      glyph: '‹', hint: 'Show full messages' },
+  full:      { next: 'collapsed', glyph: '»', hint: 'Collapse the log' },
+};
+let logMode = 'full';
+
+function setLogMode(mode) {
+  const log = document.getElementById('event-log');
+  const atBottom = log.scrollHeight - log.scrollTop < log.clientHeight + 40;
+
+  logMode = mode;
+  document.querySelector('.content').dataset.log = mode;
+  const btn = document.getElementById('log-mode-btn');
+  btn.textContent = LOG_MODES[mode].glyph;
+  btn.title = LOG_MODES[mode].hint;
+  btn.setAttribute('aria-label', LOG_MODES[mode].hint);
+
+  if (atBottom) log.scrollTop = log.scrollHeight;
+  chartViews.forEach(v => v.draw());    // the boxes just changed width
+  positionTip();
+  try { localStorage.setItem('logMode', mode); } catch {}
+}
+
+function cycleLogMode() {
+  setLogMode(LOG_MODES[logMode].next);
+}
+
+let savedLogMode = null;
+try { savedLogMode = localStorage.getItem('logMode'); } catch {}
+setLogMode(LOG_MODES[savedLogMode] ? savedLogMode : 'full');
+
 // Clock
-setInterval(() => {
+function tickClock() {
   document.getElementById('clock').textContent =
     new Date().toISOString().slice(11, 19) + ' UTC';
-}, 1000);
+}
+tickClock();
+setInterval(tickClock, 1000);
 </script>
 </body>
 </html>

@@ -91,7 +91,13 @@ public class CameraManager : MonoBehaviour
         const float padY   = 6f;
         float       width  = 210f;
         float       height = cameras.Length * lineH + padY * 2f;
-        var         panel  = new Rect(10f, Screen.height - height - 10f, width, height);
+
+        // OnGUI draws in physical pixels, so scale it to match the UI Toolkit panels.
+        float scale        = DockingUIManager.HudScale;
+        var   prevMatrix   = GUI.matrix;
+        GUI.matrix         = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+
+        var         panel  = new Rect(10f, Screen.height / scale - height - 10f, width, height);
 
         // Background
         var prev = GUI.color;
@@ -106,6 +112,8 @@ public class CameraManager : MonoBehaviour
             var    r      = new Rect(panel.x + padX, panel.y + padY + i * lineH, width - padX * 2f, lineH);
             GUI.Label(r, label, active ? _styleActive : _styleInactive);
         }
+
+        GUI.matrix = prevMatrix;
     }
 
     void EnsureStyles()
